@@ -1,73 +1,54 @@
-// Roda uma sincronizacao: le a lista de pedidos, busca o status na Mandae (e,
-// quando estiver pronto, na FontesLog), calcula o status final e grava no banco.
+// Sincronizacao periodica (rede de seguranca).
 //
-// Fonte de pedidos: por enquanto le data/orders-source.json. O proximo passo e
-// trocar isso por uma consulta direta a API do Shopify (precisa de um token de
-// app privado do Shopify -- Configuracoes > Apps > Desenvolver apps, na loja).
-// Ate la, atualize esse JSON manualmente ou plugue outra fonte em getOrderList().
+// A porta de entrada principal dos pedidos agora sao os WEBHOOKS da Mandae
+// (ver src/webhooks/mandae.js): "item processado" cria o pedido assim que a
+// Mandae expede a encomenda, e "rastreamento" atualiza o status a cada novo
+// evento, em tempo real -- sem depender de Shopify nem de nenhuma lista
+// manual de pedidos.
+//
+// Essa sincronizacao (rodada a cada SYNC_INTERVAL_MINUTES pelo scheduler)
+// serve só de reforço: re-consulta na API da Mandae o rastreio de cada
+// pedido que já conhecemos (via listOrders()), caso algum webhook tenha
+// falhado ou se perdido. Quando a integração com a FontesLog estiver pronta
+// (ver src/integrations/fonteslog.js), ela entra aqui também.
 
 import "dotenv/config";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { fetchTracking, latestEvent } from "./integrations/mandae.js";
-import { mapMandaeEvent, combineStatus } from "./lib/statusMapping.js";
-import { upsertOrder, setMeta } from "./lib/db.js";
+import { mapMandaeEvent } from "./lib/statusMapping.js";
+import { upsertOrder, listOrders, setMeta } from "./lib/db.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+async function reconcileOneOrder(order) {
+  if (!order.trackingCode) return;
 
-function getOrderList() {
-  const sourcePath = path.join(__dirname, "..", "data", "orders-source.json");
-  if (!fs.existsSync(sourcePath)) return [];
-  return JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
-}
+  try {
+    const tracking = await fetchTracking(order.trackingCode);
+    const event = latestEvent(tracking);
+    if (!event) return;
 
-async function syncOneOrder(order) {
-  let carrierStatus = null;
-  let carrierLabel = null;
-  let lastEventAt = order.placedAt || null;
+    const mapped = mapMandaeEvent(event);
+    const lastEventAt = event.timestamp || event.date || order.lastEventAt;
 
-  if (order.trackingCode) {
-    try {
-      const tracking = await fetchTracking(order.trackingCode);
-      const event = latestEvent(tracking);
-      if (event) {
-        const mapped = mapMandaeEvent(event);
-        carrierStatus = mapped.status;
-        carrierLabel = mapped.label;
-        lastEventAt = event.timestamp || event.date || lastEventAt;
-      }
-    } catch (err) {
-      console.error(`[mandae] falha ao consultar ${order.trackingCode}:`, err.message);
-    }
+    // Nada novo desde o ultimo evento que ja temos -- evita grava-lo de novo
+    // e "empurrar" updatedAt sem necessidade.
+    if (lastEventAt === order.lastEventAt && mapped.status === order.carrierSeverity) return;
+
+    upsertOrder({
+      orderNumber: order.orderNumber,
+      trackingCode: order.trackingCode,
+      carrierStatus: mapped.label,
+      carrierSeverity: mapped.status,
+      lastEventAt,
+    });
+  } catch (err) {
+    console.error(`[sync] falha ao reconciliar ${order.orderNumber} (${order.trackingCode}):`, err.message);
   }
-
-  // WMS (FontesLog) ainda nao implementado -- ver src/integrations/fonteslog.js.
-  const wmsStatus = null;
-  const wmsLabel = null;
-
-  const finalStatus = combineStatus(wmsStatus, carrierStatus);
-
-  upsertOrder({
-    orderNumber: order.orderNumber,
-    brand: order.brand,
-    customer: order.customer,
-    status: finalStatus,
-    wmsStatus: wmsLabel,
-    carrierStatus: carrierLabel,
-    trackingCode: order.trackingCode,
-    city: order.city,
-    placedAt: order.placedAt,
-    lastEventAt,
-  });
 }
 
 export async function runSync() {
-  const orders = getOrderList();
-  console.log(`[sync] iniciando sincronizacao de ${orders.length} pedido(s)...`);
+  const orders = listOrders();
+  console.log(`[sync] reconciliando ${orders.length} pedido(s) conhecido(s) com a Mandaê...`);
   for (const order of orders) {
-    if (!order.orderNumber) continue;
-    await syncOneOrder(order);
+    await reconcileOneOrder(order);
   }
   setMeta("lastSyncAt", new Date().toISOString());
   console.log("[sync] concluido.");

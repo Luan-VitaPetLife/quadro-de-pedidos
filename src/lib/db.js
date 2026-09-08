@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { combineStatus } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(__dirname, "..", "..", "data");
@@ -9,7 +10,11 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = path.join(dataDir, "orders.sqlite");
 export const db = new Database(dbPath);
-db.pragma("journal_mode = WAL");
+// Obs.: journal_mode = WAL exige mmap/locking que alguns discos de rede ou
+// pastas sincronizadas (OneDrive, bridges de VM, etc.) nao suportam bem.
+// DELETE (o padrao do SQLite) e mais lento sob alta concorrencia, mas e
+// muito mais compativel com esses ambientes -- e o suficiente para este uso.
+db.pragma("journal_mode = DELETE");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
@@ -18,8 +23,9 @@ db.exec(`
     customer TEXT,
     status TEXT NOT NULL DEFAULT 'amber',
     wms_status TEXT,
+    wms_severity TEXT,
     carrier_status TEXT,
-    carrier_event_code INTEGER,
+    carrier_severity TEXT,
     tracking_code TEXT,
     city TEXT,
     placed_at TEXT,
@@ -33,21 +39,61 @@ db.exec(`
   );
 `);
 
+// Migracao leve: bancos criados antes das colunas *_severity existirem.
+const existingCols = db.prepare("PRAGMA table_info(orders)").all().map((c) => c.name);
+if (!existingCols.includes("wms_severity")) {
+  db.exec("ALTER TABLE orders ADD COLUMN wms_severity TEXT");
+}
+if (!existingCols.includes("carrier_severity")) {
+  db.exec("ALTER TABLE orders ADD COLUMN carrier_severity TEXT");
+}
+
+const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
+
+function rowToOrder(r) {
+  if (!r) return null;
+  return {
+    orderNumber: r.order_number,
+    brand: r.brand,
+    customer: r.customer,
+    status: r.status,
+    // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
+    wmsStatus: r.wms_status,
+    carrierStatus: r.carrier_status,
+    // *_severity: cor normalizada ("green"|"amber"|"red") que cada fonte
+    // atribuiu -- e o que combineStatus() usa para decidir a cor final.
+    wmsSeverity: r.wms_severity,
+    carrierSeverity: r.carrier_severity,
+    trackingCode: r.tracking_code,
+    city: r.city,
+    placedAt: r.placed_at,
+    lastEventAt: r.last_event_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function getOrder(orderNumber) {
+  return rowToOrder(getStmt.get(String(orderNumber)));
+}
+
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
-    order_number, brand, customer, status, wms_status, carrier_status,
-    carrier_event_code, tracking_code, city, placed_at, last_event_at, updated_at
+    order_number, brand, customer, status, wms_status, wms_severity,
+    carrier_status, carrier_severity, tracking_code, city, placed_at,
+    last_event_at, updated_at
   ) VALUES (
-    @orderNumber, @brand, @customer, @status, @wmsStatus, @carrierStatus,
-    @carrierEventCode, @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
+    @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
+    @carrierStatus, @carrierSeverity, @trackingCode, @city, @placedAt,
+    @lastEventAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
     brand = excluded.brand,
     customer = excluded.customer,
     status = excluded.status,
     wms_status = excluded.wms_status,
+    wms_severity = excluded.wms_severity,
     carrier_status = excluded.carrier_status,
-    carrier_event_code = excluded.carrier_event_code,
+    carrier_severity = excluded.carrier_severity,
     tracking_code = excluded.tracking_code,
     city = excluded.city,
     placed_at = excluded.placed_at,
@@ -55,39 +101,47 @@ const upsertStmt = db.prepare(`
     updated_at = excluded.updated_at
 `);
 
-export function upsertOrder(order) {
-  upsertStmt.run({
-    orderNumber: String(order.orderNumber),
-    brand: order.brand ?? null,
-    customer: order.customer ?? null,
-    status: order.status ?? "amber",
-    wmsStatus: order.wmsStatus ?? null,
-    carrierStatus: order.carrierStatus ?? null,
-    carrierEventCode: order.carrierEventCode ?? null,
-    trackingCode: order.trackingCode ?? null,
-    city: order.city ?? null,
-    placedAt: order.placedAt ?? null,
-    lastEventAt: order.lastEventAt ?? new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
+/**
+ * Faz merge (nao sobrescreve) dos campos passados sobre o pedido existente
+ * (se houver), recalcula o status final (pior de WMS x transportadora) e
+ * grava. Cada integracao (Mandae, FontesLog) so precisa mandar o que ela
+ * sabe -- nunca precisa saber o resto do registro.
+ *
+ * Cada fonte pode mandar dois campos por status: o "Status" (texto legivel,
+ * ex.: "Pedido entregue") e o "Severity" (a cor normalizada que esse texto
+ * significa: "green"|"amber"|"red"). O campo `status` final do pedido e
+ * calculado automaticamente a partir do pior entre wmsSeverity e
+ * carrierSeverity -- a menos que quem chamar force um `status` explicito.
+ */
+export function upsertOrder(partial) {
+  const orderNumber = String(partial.orderNumber);
+  const existing = getOrder(orderNumber) || {};
+
+  const merged = {
+    orderNumber,
+    brand: partial.brand ?? existing.brand ?? null,
+    customer: partial.customer ?? existing.customer ?? null,
+    wmsStatus: partial.wmsStatus !== undefined ? partial.wmsStatus : existing.wmsStatus ?? null,
+    wmsSeverity: partial.wmsSeverity !== undefined ? partial.wmsSeverity : existing.wmsSeverity ?? null,
+    carrierStatus: partial.carrierStatus !== undefined ? partial.carrierStatus : existing.carrierStatus ?? null,
+    carrierSeverity: partial.carrierSeverity !== undefined ? partial.carrierSeverity : existing.carrierSeverity ?? null,
+    trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
+    city: partial.city ?? existing.city ?? null,
+    placedAt: partial.placedAt ?? existing.placedAt ?? null,
+    lastEventAt: partial.lastEventAt ?? existing.lastEventAt ?? new Date().toISOString(),
+  };
+
+  // status: quem chamar pode forcar um valor (partial.status); por padrao
+  // recalculamos a partir do pior entre wmsSeverity e carrierSeverity.
+  merged.status = partial.status ?? combineStatus(merged.wmsSeverity, merged.carrierSeverity);
+
+  upsertStmt.run({ ...merged, updatedAt: new Date().toISOString() });
+  return merged;
 }
 
 export function listOrders() {
   const rows = db.prepare("SELECT * FROM orders ORDER BY last_event_at DESC").all();
-  return rows.map((r) => ({
-    orderNumber: r.order_number,
-    brand: r.brand,
-    customer: r.customer,
-    status: r.status,
-    wmsStatus: r.wms_status,
-    carrierStatus: r.carrier_status,
-    carrierEventCode: r.carrier_event_code,
-    trackingCode: r.tracking_code,
-    city: r.city,
-    placedAt: r.placed_at,
-    lastEventAt: r.last_event_at,
-    updatedAt: r.updated_at,
-  }));
+  return rows.map(rowToOrder);
 }
 
 export function setMeta(key, value) {
