@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Radar Vita Pet Life</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <span class="eyebrow">Vita Pet Life &middot; Opera&ccedil;&atilde;o</span>
+        <h1>Radar Vita Pet Life</h1>
+      </div>
+      <div class="sync" id="syncLine"><span class="dot"></span>Conectando ao painel&hellip;</div>
+    </header>
+
+    <div class="summary">
+      <div class="tile total"><div class="n mono" id="cTotal">&ndash;</div><div class="l">pedidos no radar</div></div>
+      <div class="tile green"><div class="n mono" id="cGreen">&ndash;</div><div class="l">tudo certo</div></div>
+      <div class="tile amber"><div class="n mono" id="cAmber">&ndash;</div><div class="l">aviso, sem resolver</div></div>
+      <div class="tile red"><div class="n mono" id="cRed">&ndash;</div><div class="l">algo aconteceu</div></div>
+    </div>
+
+    <div class="controls">
+      <div class="filters" id="filters">
+        <button class="chip" data-filter="all" data-active="true">Todos</button>
+        <button class="chip" data-filter="red"><span class="sw" style="background:var(--red)"></span>Vermelho</button>
+        <button class="chip" data-filter="amber"><span class="sw" style="background:var(--amber)"></span>Amarelo</button>
+        <button class="chip" data-filter="green"><span class="sw" style="background:var(--green)"></span>Verde</button>
+      </div>
+      <div class="filters" id="brandFilters">
+        <button class="chip" data-brandfilter="all" data-active="true">Todas as marcas</button>
+      </div>
+      <input class="search" id="search" type="text" placeholder="Buscar pedido ou cliente&hellip;">
+    </div>
+
+    <div class="board">
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="emptyState" hidden></div>
+      <div class="legend">
+        <div class="item"><span class="sw" style="background:var(--green)"></span>Verde &ndash; pedido correto, sem pend&ecirc;ncias</div>
+        <div class="item"><span class="sw" style="background:var(--amber)"></span>Amarelo &ndash; aviso em aberto (ainda n&atilde;o resolvido)</div>
+        <div class="item"><span class="sw" style="background:var(--red)"></span>Vermelho &ndash; problema (ex.: tentativa de entrega falhou)</div>
+      </div>
+      <div class="note" id="feedNote"></div>
+    </div>
+  </div>
+
+  <div class="panel-backdrop" id="backdrop">
+    <div class="panel" id="panel"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

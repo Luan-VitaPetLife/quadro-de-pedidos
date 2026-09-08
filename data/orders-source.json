@@ -1,0 +1,10 @@
+[
+  {
+    "orderNumber": "EXEMPLO-0001",
+    "brand": "Yucaloo",
+    "customer": "Pedido de exemplo",
+    "trackingCode": "",
+    "city": "",
+    "placedAt": "2026-09-01T10:00:00-03:00"
+  }
+]

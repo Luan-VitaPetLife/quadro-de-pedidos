@@ -1,0 +1,23 @@
+{
+  "name": "quadro-de-pedidos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Radar de pedidos Vita Pet Life - sincroniza FontesLog (WMS) e Mandae e mostra o status de cada pedido em um quadro colorido.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "sync": "node src/sync.js",
+    "explore-fonteslog": "node src/explore-fonteslog.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "playwright": "^1.47.0"
+  }
+}
