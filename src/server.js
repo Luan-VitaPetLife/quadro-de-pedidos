@@ -7,7 +7,7 @@ import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
-import { handleAutorizar, handleCallback, handleStatus } from "./webhooks/bling.js";
+import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico } from "./webhooks/bling.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -68,6 +68,7 @@ app.post("/webhooks/fonteslog", handleFontesLog);
 app.get("/bling/autorizar", handleAutorizar);
 app.get("/bling/callback", handleCallback);
 app.get("/bling/status", handleStatus);
+app.get("/bling/diagnostico", handleDiagnostico);
 
 /**
  * Confere na subida o que so daria erro (ou pior: silencio) muito depois.
