@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listOrders, getMeta } from "./lib/db.js";
+import { listOrders, getMeta, dataDir, dataDirSource } from "./lib/db.js";
 import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
@@ -72,17 +72,36 @@ function checarConfiguracao() {
         "Qualquer pessoa que descubra a URL consegue inventar pedidos no quadro. Defina a variavel."
     );
   }
-  if (!process.env.DATA_DIR && process.env.RAILWAY_ENVIRONMENT) {
+  if (process.env.RAILWAY_ENVIRONMENT && dataDirSource === "padrao-local") {
     console.warn(
-      "[config] Rodando no Railway sem DATA_DIR -- o banco esta no disco efemero e VAI SUMIR no proximo deploy. " +
-        "Crie um Volume e aponte DATA_DIR para o mount path dele."
+      `[config] Rodando no Railway com o banco em ${dataDir}, que NAO e um Volume -- ` +
+        "esse disco e efemero e o historico VAI SUMIR no proximo deploy. " +
+        "Anexe um Volume ao servico (ou defina DATA_DIR apontando pro mount path dele)."
     );
+  } else if (process.env.RAILWAY_ENVIRONMENT) {
+    console.log(`[config] banco no Volume (${dataDirSource}): ${dataDir}`);
   }
 }
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`[server] Radar de pedidos rodando na porta ${port}`);
+const port = Number(process.env.PORT) || 3000;
+
+// HOST 0.0.0.0 e obrigatorio em container. Sem o segundo argumento, o Node
+// escuta em "::" -- e se o proxy do Railway tentar alcancar o container por
+// IPv4, a conexao morre e a borda devolve 502 "Application failed to respond",
+// mesmo com o processo vivo e saudavel (que foi exatamente o que aconteceu).
+const host = process.env.HOST || "0.0.0.0";
+
+app.listen(port, host, () => {
+  console.log(`[server] Radar de pedidos escutando em http://${host}:${port}`);
+  // Deixa explicito de onde veio a porta: se PORT nao existir no ambiente, o
+  // proxy do Railway quase certamente esta mirando outra porta -- e essa e a
+  // primeira coisa a conferir num 502.
+  console.log(
+    process.env.PORT
+      ? `[server] porta veio da variavel PORT (${process.env.PORT}).`
+      : "[server] ATENCAO: variavel PORT ausente -- usando 3000 como padrao. " +
+          "No Railway, confira em Settings -> Networking se a porta alvo do dominio e 3000."
+  );
   checarConfiguracao();
   startScheduler();
 });
