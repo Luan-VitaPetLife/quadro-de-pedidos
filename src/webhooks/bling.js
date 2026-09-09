@@ -96,3 +96,46 @@ export function handleStatus(req, res) {
     accessTokenExpirado: Date.now() >= t.expiraEm,
   });
 }
+
+// GET /bling/diagnostico?s=<segredo>
+//
+// Existe pra responder UMA pergunta que so o dado real responde: o Bling
+// guarda o codigo de rastreio dos pedidos que saem pela Mandae? A forma exata
+// da resposta nao esta na documentacao que da pra ler de fora, entao esta rota
+// devolve a estrutura crua de um pedido e o resultado da extracao em varios,
+// pra conferir campo a campo em vez de adivinhar.
+export async function handleDiagnostico(req, res) {
+  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
+
+  try {
+    const { listarPedidos, detalhePedido, extrairDoPedido } = await import("../integrations/bling.js");
+
+    const hoje = new Date();
+    const inicio = new Date(hoje.getTime() - 30 * 86400000);
+    const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje, maxPaginas: 1 });
+
+    if (lista.length === 0) {
+      return res.json({ pedidosNoPeriodo: 0, aviso: "Nenhum pedido nos ultimos 30 dias." });
+    }
+
+    // Detalhe de alguns: o rastreio costuma existir so no detalhe, nao na lista.
+    const amostra = [];
+    for (const p of lista.slice(0, 5)) {
+      const det = await detalhePedido(p.id);
+      amostra.push({ extraido: extrairDoPedido(det), temTransporte: !!det?.transporte });
+    }
+
+    const primeiroDetalhe = await detalhePedido(lista[0].id);
+
+    res.json({
+      pedidosNoPeriodo: lista.length,
+      camposDaLista: Object.keys(lista[0] || {}),
+      camposDoDetalhe: Object.keys(primeiroDetalhe || {}),
+      transporteCru: primeiroDetalhe?.transporte ?? null,
+      amostraExtraida: amostra,
+      quantosComRastreio: amostra.filter((a) => a.extraido?.trackingCode).length,
+    });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
