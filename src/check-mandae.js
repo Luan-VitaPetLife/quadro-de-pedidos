@@ -99,6 +99,20 @@ async function main() {
   const eventos = Array.isArray(tracking.events) ? tracking.events : [];
   ok(`${eventos.length} evento(s) recebido(s).`);
 
+  // A PONTE com o WMS: sem esse campo preenchido, o mesmo pedido vira dois
+  // quadrados -- um com o numero do pedido (vindo da FontesLog) e outro com o
+  // codigo de rastreio (vindo da Mandae). Ver o README, secao "Ponte".
+  const referencia = tracking.partnerItemId || tracking.idItemParceiro || "";
+  console.log("");
+  if (referencia) {
+    ok(`Ponte OK: a Mandae conhece esse envio como pedido "${referencia}".`);
+    console.log("     Se esse valor for igual ao 'Numero Pedido' no WMS, os dois viram UM quadrado.");
+  } else {
+    aviso("PONTE AUSENTE: partnerItemId/idItemParceiro vieram vazios.");
+    console.log("     Quem cria a remessa na Mandae nao esta mandando o numero do pedido.");
+    console.log("     Enquanto isso, esse envio vira um quadrado separado do mesmo pedido no WMS.");
+  }
+
   if (eventos.length === 0) {
     aviso("Rastreio sem eventos ainda -- no quadro esse pedido ficaria AMARELO.");
     console.log("");
