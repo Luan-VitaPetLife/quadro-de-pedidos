@@ -12,7 +12,8 @@
     "sync": "node src/sync.js",
     "explore-fonteslog": "node src/explore-fonteslog.js",
     "dev": "node --watch src/server.js",
-    "check-mandae": "node src/check-mandae.js"
+    "check-mandae": "node src/check-mandae.js",
+    "testar-pedido": "node src/testar-pedido.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
