@@ -92,6 +92,7 @@ function openPanel(orderNumber) {
       <button class="close" aria-label="Fechar">&times;</button>
     </div>
     <span class="status-pill ${o.status}">${statusWord[o.status] || o.status}</span>
+    ${o.motivoStatus ? `<div class="motivo">${o.motivoStatus}. Último evento conhecido: "${o.carrierStatus || "nenhum"}".</div>` : ""}
     <div class="field"><div class="k">Cliente</div><div class="v">${o.customer || "—"}</div></div>
     <div class="field"><div class="k">Status FontesLog (WMS)</div><div class="v">${o.wmsStatus || "sem dado ainda"}</div></div>
     <div class="field"><div class="k">Último evento Mandaê</div><div class="v">${o.carrierStatus || "sem dado ainda"}</div></div>
@@ -99,6 +100,7 @@ function openPanel(orderNumber) {
     <div class="field"><div class="k">Destino</div><div class="v">${o.city || "—"}</div></div>
     <div class="field"><div class="k">Pedido feito em</div><div class="v mono">${fmtDate(o.placedAt)}</div></div>
     <div class="field"><div class="k">Última atualização</div><div class="v mono">${fmtDate(o.lastEventAt)}</div></div>
+    <div class="field"><div class="k">Dias úteis sem novidade</div><div class="v mono">${o.diasParados ?? "—"}</div></div>
   `;
   panel.querySelector(".close").addEventListener("click", closePanel);
   backdrop.classList.add("open");
