@@ -38,7 +38,11 @@ export function startScheduler() {
   // Roda uma vez ao subir, sem travar o boot do servidor.
   runSync().catch((err) => console.error("[scheduler] erro na sincronizacao inicial:", err));
 
-  cron.schedule(cronExpr, () => {
+  const tarefa = cron.schedule(cronExpr, () => {
     runSync().catch((err) => console.error("[scheduler] erro na sincronizacao agendada:", err));
   });
+
+  // Devolvido pra que o encerramento gracioso consiga parar o timer -- sem
+  // isso o cron segura o processo vivo e o desligamento estoura o prazo.
+  return tarefa;
 }
