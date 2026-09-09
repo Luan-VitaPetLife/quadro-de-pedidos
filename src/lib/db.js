@@ -199,3 +199,64 @@ export function getMeta(key) {
   const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key);
   return row ? row.value : null;
 }
+
+export function apagarPedido(orderNumber) {
+  return db.prepare("DELETE FROM orders WHERE order_number = ?").run(String(orderNumber)).changes;
+}
+
+/**
+ * Junta num unico pedido os registros que sao a MESMA venda mas entraram com
+ * chaves diferentes.
+ *
+ * Por que isso e necessario: o Bling manda referencias diferentes para cada
+ * sistema. O WMS recebe o `numero` do Bling ("1445"); a Mandae recebe o
+ * `numeroLoja` do marketplace ("7416887836984") -- e as vezes nem isso, e o
+ * pedido entra pelo codigo de rastreio. Resultado: a mesma venda ocupa dois ou
+ * tres quadrados, cada um contando metade da historia.
+ *
+ * Só o Bling conhece as tres chaves ao mesmo tempo, entao e ele quem diz o que
+ * mesclar. O `numero` vira o canonico: e a chave que o WMS usa e a que a
+ * operacao reconhece.
+ *
+ * A regra de merge e conservadora -- so PREENCHE campo vazio do canonico com o
+ * valor do apelido, nunca sobrescreve o que ja existe. Assim o status do WMS
+ * (que mora no canonico) e o da transportadora (que mora no apelido) se somam
+ * em vez de um apagar o outro.
+ */
+export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
+  const canonico = String(numeroCanonico);
+  const resultado = { mesclados: 0, apelidosApagados: [] };
+
+  for (const bruto of apelidos) {
+    const apelido = String(bruto ?? "").trim();
+    if (!apelido || apelido === canonico) continue;
+
+    const linha = getOrder(apelido);
+    if (!linha) continue;
+
+    const atual = getOrder(canonico) || {};
+    const preencher = {};
+
+    for (const campo of [
+      "brand", "customer", "city", "placedAt",
+      "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
+    ]) {
+      const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
+      const apelidoTem = linha[campo] !== undefined && linha[campo] !== null && linha[campo] !== "";
+      if (!jaTem && apelidoTem) preencher[campo] = linha[campo];
+    }
+
+    // O evento mais recente entre os dois manda: o envelhecimento conta a
+    // partir dele, e usar o mais antigo faria o pedido parecer parado.
+    const datas = [atual.lastEventAt, linha.lastEventAt].filter(Boolean).sort();
+    if (datas.length) preencher.lastEventAt = datas[datas.length - 1];
+
+    upsertOrder({ orderNumber: canonico, ...preencher });
+    apagarPedido(apelido);
+
+    resultado.mesclados++;
+    resultado.apelidosApagados.push(apelido);
+  }
+
+  return resultado;
+}

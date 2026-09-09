@@ -147,3 +147,31 @@ export async function handleDiagnostico(req, res) {
     res.status(500).json({ erro: err.message });
   }
 }
+
+// POST /bling/sincronizar?s=<segredo>
+//
+// Dispara a leitura do Bling na hora. A sincronizacao pode demorar (uma
+// chamada por pedido, com intervalo pra respeitar o limite do Bling), entao
+// responde na hora e segue trabalhando em segundo plano -- se esperasse, o
+// proxy do Railway cortaria a conexao antes do fim.
+let sincronizacaoEmCurso = false;
+
+export async function handleSincronizar(req, res) {
+  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
+  if (sincronizacaoEmCurso) {
+    return res.status(409).json({ error: "ja existe uma sincronizacao do Bling em andamento" });
+  }
+
+  const dias = Number(req.query?.dias) || 30;
+  sincronizacaoEmCurso = true;
+  res.json({ ok: true, iniciada: true, dias, acompanhe: "veja os logs do Railway ou /bling/status" });
+
+  try {
+    const { runSyncBling } = await import("../sync-bling.js");
+    await runSyncBling({ dias });
+  } catch (err) {
+    console.error("[bling] sincronizacao falhou:", err.message);
+  } finally {
+    sincronizacaoEmCurso = false;
+  }
+}
