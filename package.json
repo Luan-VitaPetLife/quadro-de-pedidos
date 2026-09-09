@@ -11,13 +11,16 @@
     "start": "node src/server.js",
     "sync": "node src/sync.js",
     "explore-fonteslog": "node src/explore-fonteslog.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "check-mandae": "node src/check-mandae.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "node-cron": "^3.0.3",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
     "playwright": "^1.47.0"
   }
 }

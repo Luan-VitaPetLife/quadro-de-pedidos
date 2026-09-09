@@ -11,6 +11,22 @@
 import { upsertOrder } from "../lib/db.js";
 import { mapMandaeEvent } from "../lib/statusMapping.js";
 
+/**
+ * Pega o primeiro candidato que seja um identificador de verdade.
+ *
+ * Cuidado que motivou essa funcao: `a || b || String(c)` com os tres campos
+ * vazios produz a STRING "undefined", que e truthy -- a guarda `if (!id)`
+ * passava batido e o quadro ganhava um quadrado chamado "undefined".
+ */
+function primeiroIdentificador(...candidatos) {
+  for (const c of candidatos) {
+    if (c === null || c === undefined) continue;
+    const s = String(c).trim();
+    if (s && s !== "undefined" && s !== "null") return s;
+  }
+  return null;
+}
+
 export function verifyMandaeWebhook(req) {
   const expected = process.env.MANDAE_WEBHOOK_SECRET;
   if (!expected) return true; // sem segredo configurado ainda -- nao bloqueia em dev
@@ -23,8 +39,11 @@ export async function handleItemProcessado(req, res) {
   if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "assinatura invalida" });
 
   const body = req.body || {};
-  const orderNumber = body.partnerItemId || body.reference || String(body.id);
-  if (!orderNumber) return res.status(400).json({ error: "payload sem partnerItemId/reference" });
+  const orderNumber = primeiroIdentificador(body.partnerItemId, body.reference, body.id);
+  if (!orderNumber) {
+    console.warn("[webhook] item processado ignorado -- payload sem identificador:", JSON.stringify(body).slice(0, 500));
+    return res.status(400).json({ error: "payload sem partnerItemId/reference/id" });
+  }
 
   // Acabou de ser expedido -- ainda sem evento de rastreio, entao tratamos
   // como aviso (amber) ate o primeiro evento de rastreamento chegar.
@@ -45,8 +64,11 @@ export async function handleRastreamento(req, res) {
   if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "assinatura invalida" });
 
   const body = req.body || {};
-  const orderNumber = body.idItemParceiro || body.trackingCode;
-  if (!orderNumber) return res.status(400).json({ error: "payload sem idItemParceiro/trackingCode" });
+  const orderNumber = primeiroIdentificador(body.idItemParceiro, body.trackingCode);
+  if (!orderNumber) {
+    console.warn("[webhook] rastreamento ignorado -- payload sem identificador:", JSON.stringify(body).slice(0, 500));
+    return res.status(400).json({ error: "payload sem idItemParceiro/trackingCode" });
+  }
 
   const events = Array.isArray(body.events) ? body.events : [];
   const latest = [...events].sort((a, b) => {
