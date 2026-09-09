@@ -44,11 +44,22 @@ export function carregarCookies() {
   return doPortal.map((c) => `${c.name}=${c.value}`).join("; ");
 }
 
+// O portal e ASP.NET e escapa acento como entidade numerica: "PROJETO NATÁLIA"
+// chega no HTML como "PROJETO NAT&#193;LIA". Sem decodificar, o numero do
+// pedido ia pro quadro literalmente com o "&#193;" no meio -- e como o numero
+// do pedido e a CHAVE do registro, isso quebraria qualquer cruzamento futuro
+// com o mesmo pedido vindo de outra fonte.
+const ENTIDADES = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+function decodificarEntidades(texto) {
+  return texto
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, num) => String.fromCodePoint(Number(num)))
+    .replace(/&(\w+);/g, (inteiro, nome) => (nome in ENTIDADES ? ENTIDADES[nome] : inteiro));
+}
+
 function limpar(html) {
-  return html
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+  return decodificarEntidades(html.replace(/<[^>]*>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
 }
