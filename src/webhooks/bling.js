@@ -119,17 +119,11 @@ export async function handleDiagnostico(req, res) {
     }
 
     // Detalhe de alguns: o rastreio costuma existir so no detalhe, nao na lista.
-    const amostra = [];
-    for (const p of lista.slice(0, 5)) {
-      const det = await detalhePedido(p.id);
-      amostra.push({ extraido: extrairDoPedido(det), temTransporte: !!det?.transporte });
-    }
-
     // Mapa numero x numeroLoja x rastreio. E o que revela QUAL dos dois numeros
     // o WMS usa como "Numero Pedido" -- coisa que nao da pra deduzir, so
     // comparando com os numeros que ja estao no quadro.
     const mapa = [];
-    for (const p of lista.slice(0, 25)) {
+    for (const p of lista.slice(0, 10)) {
       const det = await detalhePedido(p.id);
       mapa.push({
         numero: det?.numero ?? null,
@@ -137,18 +131,16 @@ export async function handleDiagnostico(req, res) {
         loja: det?.loja?.id ?? null,
         transportadora: det?.transporte?.contato?.nome ?? null,
         rastreio: (det?.transporte?.volumes || []).map((v) => v?.codigoRastreamento).find(Boolean) || null,
+        extraido: extrairDoPedido(det),
       });
     }
 
-    const primeiroDetalhe = await detalhePedido(lista[0].id);
+
 
     res.json({
       pedidosNoPeriodo: lista.length,
       camposDaLista: Object.keys(lista[0] || {}),
-      camposDoDetalhe: Object.keys(primeiroDetalhe || {}),
-      transporteCru: primeiroDetalhe?.transporte ?? null,
-      amostraExtraida: amostra,
-      quantosComRastreio: amostra.filter((a) => a.extraido?.trackingCode).length,
+      quantosComRastreio: mapa.filter((m) => m.rastreio).length,
       mapa,
     });
   } catch (err) {

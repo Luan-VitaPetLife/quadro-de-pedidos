@@ -116,12 +116,48 @@ export async function tokenValido() {
   }
 }
 
-async function blingFetch(caminho, params = {}) {
+// ---------------------------------------------------------------------------
+// Limite de requisicoes
+// ---------------------------------------------------------------------------
+//
+// O Bling responde 429 TOO_MANY_REQUESTS quando se passa do teto por segundo
+// (descoberto na pratica, disparando 31 chamadas seguidas). Isso nao e detalhe:
+// a sincronizacao precisa de UMA chamada de detalhe por pedido -- o rastreio so
+// existe no detalhe, a listagem nao traz -- entao 200 pedidos sao 200 chamadas.
+//
+// Duas defesas: um intervalo minimo entre chamadas, e repeticao com espera
+// crescente se o 429 vier mesmo assim.
+
+const INTERVALO_MIN_MS = Number(process.env.BLING_INTERVALO_MS || 400);
+let ultimaChamada = 0;
+
+function dormir(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function esperarAVez() {
+  const falta = ultimaChamada + INTERVALO_MIN_MS - Date.now();
+  if (falta > 0) await dormir(falta);
+  ultimaChamada = Date.now();
+}
+
+async function blingFetch(caminho, params = {}, tentativa = 1) {
   const token = await tokenValido();
   const url = `${BASE}${caminho}?${new URLSearchParams(params)}`;
+
+  await esperarAVez();
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
+
+  if (res.status === 429) {
+    if (tentativa > 4) throw new Error(`Bling seguiu recusando por excesso de requisicoes em ${caminho}`);
+    const espera = 1000 * 2 ** (tentativa - 1); // 1s, 2s, 4s, 8s
+    console.warn(`[bling] 429 em ${caminho}; esperando ${espera}ms e tentando de novo (${tentativa}/4)`);
+    await dormir(espera);
+    return blingFetch(caminho, params, tentativa + 1);
+  }
+
   if (res.status === 401) throw new Error("BLING_NAO_AUTORIZADO");
   if (!res.ok) throw new Error(`Bling respondeu ${res.status} em ${caminho}: ${(await res.text()).slice(0, 200)}`);
   return res.json();
