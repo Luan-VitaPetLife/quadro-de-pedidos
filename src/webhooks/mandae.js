@@ -34,11 +34,50 @@ export function verifyMandaeWebhook(req) {
   return got === expected;
 }
 
+/**
+ * Loga uma chamada recusada por segredo invalido.
+ *
+ * Por que isso importa: sem esse log, "a Mandae chamou e foi rejeitada" e
+ * "a Mandae nunca chamou" produzem exatamente o mesmo sintoma -- quadro vazio
+ * e log em branco. Registrando a recusa, o log distingue os dois casos na hora.
+ *
+ * Mostra os NOMES dos headers recebidos (nunca os valores) porque a causa mais
+ * provavel de recusa e o painel da Mandae mandar o segredo com outro nome de
+ * header: aqui da pra ver qual nome chegou e corrigir a configuracao.
+ */
+function logarRecusa(req, rota) {
+  const nomes = Object.keys(req.headers || {}).filter(
+    (h) => !["host", "connection", "content-length", "accept", "accept-encoding", "user-agent"].includes(h)
+  );
+  const temHeader = req.get("X-Mandae-Secret") !== undefined;
+  console.warn(
+    `[webhook] ${rota} RECUSADO (401): ` +
+      (temHeader
+        ? "o header X-Mandae-Secret veio, mas com valor diferente do MANDAE_WEBHOOK_SECRET configurado."
+        : "o header X-Mandae-Secret NAO veio na chamada.") +
+      ` Headers recebidos: ${nomes.join(", ")}`
+  );
+}
+
+/**
+ * Registra que a chamada foi aceita e quais campos vieram no corpo. Serve pra
+ * conferir, no primeiro webhook real, se os nomes de campo que o codigo procura
+ * (partnerItemId, idItemParceiro, events...) batem com os que a Mandae manda de
+ * verdade -- foram tirados da documentacao, nunca de uma chamada real.
+ */
+function logarAceite(rota, body) {
+  console.log(`[webhook] ${rota} aceito. Campos no corpo: ${Object.keys(body || {}).join(", ") || "(vazio)"}`);
+}
+
 // POST /webhooks/mandae/item-processado
 export async function handleItemProcessado(req, res) {
-  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "assinatura invalida" });
+  if (!verifyMandaeWebhook(req)) {
+    logarRecusa(req, "item-processado");
+    return res.status(401).json({ error: "assinatura invalida" });
+  }
 
   const body = req.body || {};
+  logarAceite("item-processado", body);
   const orderNumber = primeiroIdentificador(body.partnerItemId, body.reference, body.id);
   if (!orderNumber) {
     console.warn("[webhook] item processado ignorado -- payload sem identificador:", JSON.stringify(body).slice(0, 500));
@@ -61,9 +100,13 @@ export async function handleItemProcessado(req, res) {
 
 // POST /webhooks/mandae/rastreamento
 export async function handleRastreamento(req, res) {
-  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "assinatura invalida" });
+  if (!verifyMandaeWebhook(req)) {
+    logarRecusa(req, "rastreamento");
+    return res.status(401).json({ error: "assinatura invalida" });
+  }
 
   const body = req.body || {};
+  logarAceite("rastreamento", body);
   const orderNumber = primeiroIdentificador(body.idItemParceiro, body.trackingCode);
   if (!orderNumber) {
     console.warn("[webhook] rastreamento ignorado -- payload sem identificador:", JSON.stringify(body).slice(0, 500));
