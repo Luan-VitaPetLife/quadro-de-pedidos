@@ -152,3 +152,22 @@ async function poll() {
 
 poll();
 setInterval(poll, POLL_MS);
+
+document.getElementById("syncBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("syncBtn");
+  const syncLine = document.getElementById("syncLine");
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = "Sincronizando\u2026";
+  try {
+    const res = await fetch("/api/sync", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "falha ao sincronizar");
+    await poll();
+  } catch (err) {
+    syncLine.textContent = "N\u00e3o deu pra sincronizar agora: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+});

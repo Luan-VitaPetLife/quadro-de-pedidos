@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listOrders, getMeta } from "./lib/db.js";
 import { startScheduler } from "./scheduler.js";
+import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,26 @@ app.get("/api/orders", (req, res) => {
 
 app.get("/api/meta", (req, res) => {
   res.json({ lastSyncAt: getMeta("lastSyncAt") });
+});
+
+// Botao "Sincronizar agora" do quadro -- forca a reconciliacao de reforco
+// (mesma logica do agendador de 2h) na hora, sem esperar o ciclo. Util pra
+// testes e pra conferir a Mandae depois de mexer em algum pedido.
+let syncInFlight = false;
+app.post("/api/sync", async (req, res) => {
+  if (syncInFlight) {
+    return res.status(409).json({ error: "ja existe uma sincronizacao em andamento" });
+  }
+  syncInFlight = true;
+  try {
+    await runSync();
+    res.json({ ok: true, lastSyncAt: getMeta("lastSyncAt") });
+  } catch (err) {
+    console.error("[api/sync] falha:", err);
+    res.status(500).json({ error: "falha ao sincronizar", detail: err.message });
+  } finally {
+    syncInFlight = false;
+  }
 });
 
 // Configurar em: painel da Mandaê -> Configurações da conta -> API -> Webhooks.
