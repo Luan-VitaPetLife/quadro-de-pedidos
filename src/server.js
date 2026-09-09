@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listOrders, getMeta, dataDir, dataDirSource } from "./lib/db.js";
+import { listOrders, getMeta, dataDir, dataDirSource, db } from "./lib/db.js";
 import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
@@ -95,7 +95,9 @@ const port = Number(process.env.PORT) || 3000;
 // mesmo com o processo vivo e saudavel (que foi exatamente o que aconteceu).
 const host = process.env.HOST || "0.0.0.0";
 
-app.listen(port, host, () => {
+let tarefaAgendada = null;
+
+const servidor = app.listen(port, host, () => {
   console.log(`[server] Radar de pedidos escutando em http://${host}:${port}`);
   // Deixa explicito de onde veio a porta: se PORT nao existir no ambiente, o
   // proxy do Railway quase certamente esta mirando outra porta -- e essa e a
@@ -107,5 +109,65 @@ app.listen(port, host, () => {
           "No Railway, confira em Settings -> Networking se a porta alvo do dominio e 3000."
   );
   checarConfiguracao();
-  startScheduler();
+  tarefaAgendada = startScheduler();
+});
+
+// ---------------------------------------------------------------------------
+// Encerramento gracioso
+// ---------------------------------------------------------------------------
+//
+// Por que isso existe: a cada deploy, o Railway manda SIGTERM pro container
+// antigo. Sem tratador, o Node morre com codigo 143 (128 + 15) -- e o Railway
+// le qualquer saida diferente de zero como CRASH, disparando alerta por email.
+// O resultado era um email de "producao quebrou" em todo deploy bem-sucedido:
+// alarme falso puro, e do pior tipo, porque ensina a ignorar o alerta.
+//
+// Tratando o sinal, o processo fecha o que precisa e sai com 0 -- que o
+// Railway entende como "encerrou porque mandei encerrar".
+
+let encerrando = false;
+
+function encerrar(sinal) {
+  if (encerrando) return; // dois sinais seguidos nao viram dois desligamentos
+  encerrando = true;
+  console.log(`[server] recebi ${sinal}, encerrando com calma...`);
+
+  // Prazo maximo. Se algo travar (conexao pendurada, escrita longa), e melhor
+  // sair a forca do que o orquestrador nos matar -- morte por timeout volta a
+  // contar como crash, que e justamente o que estamos evitando.
+  const prazo = setTimeout(() => {
+    console.warn("[server] demorou demais pra fechar; saindo assim mesmo.");
+    process.exit(0);
+  }, 10000);
+  prazo.unref();
+
+  try {
+    tarefaAgendada?.stop();
+  } catch (err) {
+    console.error("[server] falha ao parar o agendador:", err.message);
+  }
+
+  servidor.close(() => {
+    try {
+      db.close(); // fecha o SQLite: garante que nada fique escrito pela metade
+    } catch (err) {
+      console.error("[server] falha ao fechar o banco:", err.message);
+    }
+    console.log("[server] encerrado normalmente.");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => encerrar("SIGTERM")); // deploy/parada no Railway
+process.on("SIGINT", () => encerrar("SIGINT")); // Ctrl+C no terminal
+
+// Um erro solto derrubava o processo sem deixar rastro no log -- e a proxima
+// pessoa a investigar so via o container reiniciando. Agora ao menos fica
+// escrito o que aconteceu antes de sair.
+process.on("unhandledRejection", (motivo) => {
+  console.error("[server] promessa rejeitada sem tratamento:", motivo);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] excecao nao tratada:", err);
+  process.exit(1); // aqui a saida e 1 de proposito: isso E uma falha de verdade
 });
