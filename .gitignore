@@ -5,3 +5,6 @@ data/*.sqlite-journal
 data/fonteslog-debug/
 npm-debug.log*
 .DS_Store
+
+# pasta de sobra que a ponte do Cowork as vezes cria por engano
+Claude outputs/
