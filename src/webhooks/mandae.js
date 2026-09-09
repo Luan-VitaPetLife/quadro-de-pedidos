@@ -27,11 +27,26 @@ function primeiroIdentificador(...candidatos) {
   return null;
 }
 
+/**
+ * Confere se a chamada e mesmo da Mandae.
+ *
+ * Aceita o segredo por DOIS caminhos, de proposito:
+ *
+ *   1. header "X-Mandae-Secret" -- o jeito preferido, e o que o painel da
+ *      Mandae oferece para o webhook de RASTREAMENTO.
+ *   2. query string "?s=<segredo>" na propria URL -- necessario porque o painel
+ *      da Mandae NAO tem campos de header para o webhook de ITEM PROCESSADO:
+ *      so da pra cadastrar a URL. Como a URL e livre, o segredo viaja nela.
+ *
+ * Sem o caminho 2, o item-processado seria recusado com 401 e nenhum pedido
+ * chegaria a ser criado -- o quadro ficaria permanentemente vazio.
+ */
 export function verifyMandaeWebhook(req) {
   const expected = process.env.MANDAE_WEBHOOK_SECRET;
   if (!expected) return true; // sem segredo configurado ainda -- nao bloqueia em dev
-  const got = req.get("X-Mandae-Secret");
-  return got === expected;
+  const doHeader = req.get("X-Mandae-Secret");
+  const daUrl = req.query?.s;
+  return doHeader === expected || daUrl === expected;
 }
 
 /**
@@ -50,13 +65,18 @@ function logarRecusa(req, rota) {
     (h) => !["host", "connection", "content-length", "accept", "accept-encoding", "user-agent"].includes(h)
   );
   const temHeader = req.get("X-Mandae-Secret") !== undefined;
-  console.warn(
-    `[webhook] ${rota} RECUSADO (401): ` +
-      (temHeader
-        ? "o header X-Mandae-Secret veio, mas com valor diferente do MANDAE_WEBHOOK_SECRET configurado."
-        : "o header X-Mandae-Secret NAO veio na chamada.") +
-      ` Headers recebidos: ${nomes.join(", ")}`
-  );
+  const temQuery = req.query?.s !== undefined;
+  let motivo;
+  if (temHeader) {
+    motivo = "o header X-Mandae-Secret veio, mas com valor diferente do MANDAE_WEBHOOK_SECRET configurado.";
+  } else if (temQuery) {
+    motivo = "veio ?s= na URL, mas com valor diferente do MANDAE_WEBHOOK_SECRET configurado.";
+  } else {
+    motivo =
+      "nao veio nem o header X-Mandae-Secret nem ?s= na URL. Se for o webhook de item-processado, " +
+      "cadastre a URL com ?s=<MANDAE_WEBHOOK_SECRET> no final -- o painel da Mandae nao tem campo de header pra ele.";
+  }
+  console.warn(`[webhook] ${rota} RECUSADO (401): ${motivo} Headers recebidos: ${nomes.join(", ")}`);
 }
 
 /**
