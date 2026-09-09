@@ -35,11 +35,35 @@ export function startScheduler() {
     `[scheduler] sincronizacao agendada a cada ${minutes} minuto(s) -- cron "${cronExpr}".`
   );
 
+  // A sincronizacao do Bling nao e obrigatoria: se ninguem autorizou ainda, ela
+  // falha com BLING_NAO_AUTORIZADO e isso NAO e erro -- e so a integracao que
+  // ainda nao existe. Registrar como erro barulhento treinaria a ignorar o log.
+  async function rodarBling() {
+    try {
+      const { runSyncBling } = await import("./sync-bling.js");
+      await runSyncBling({ dias: Number(process.env.BLING_DIAS || 30) });
+    } catch (err) {
+      if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) {
+        console.log("[scheduler] Bling ainda nao autorizado; pulando. (abra /bling/autorizar?s=SEGREDO)");
+        return;
+      }
+      console.error("[scheduler] erro na sincronizacao do Bling:", err.message);
+    }
+  }
+
+  async function ciclo() {
+    // Ordem importa: a Mandae/WMS atualizam status; o Bling depois mescla os
+    // duplicados e preenche cadastro. Mesclar antes deixaria de fora o que
+    // acabou de chegar.
+    await runSync().catch((err) => console.error("[scheduler] erro na sincronizacao:", err));
+    await rodarBling();
+  }
+
   // Roda uma vez ao subir, sem travar o boot do servidor.
-  runSync().catch((err) => console.error("[scheduler] erro na sincronizacao inicial:", err));
+  ciclo();
 
   const tarefa = cron.schedule(cronExpr, () => {
-    runSync().catch((err) => console.error("[scheduler] erro na sincronizacao agendada:", err));
+    ciclo();
   });
 
   // Devolvido pra que o encerramento gracioso consiga parar o timer -- sem
