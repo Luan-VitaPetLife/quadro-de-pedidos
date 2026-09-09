@@ -7,6 +7,7 @@ import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
+import { handleAutorizar, handleCallback, handleStatus } from "./webhooks/bling.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -61,6 +62,12 @@ app.post("/webhooks/mandae/rastreamento", handleRastreamento);
 
 // Recebe o que o script local leu do WMS da FontesLog (ver src/sync-fonteslog.js).
 app.post("/webhooks/fonteslog", handleFontesLog);
+
+// OAuth do Bling. O /bling/callback e o "Link de redirecionamento" cadastrado
+// no app criado na Area do integrador do Bling.
+app.get("/bling/autorizar", handleAutorizar);
+app.get("/bling/callback", handleCallback);
+app.get("/bling/status", handleStatus);
 
 /**
  * Confere na subida o que so daria erro (ou pior: silencio) muito depois.
