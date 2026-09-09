@@ -62,6 +62,7 @@ const AMBER_PATTERNS = [
 const GREEN_PATTERNS = [
   /entrega realizada|pedido entregue/, // 1
   /processo iniciado/, // 0
+  /coletad|em separacao/, // "Encomenda coletada" / "em processo de separacao": progresso normal
   /rota final|saiu para entrega/, // 31
   /em transito/, // 33
   /encomenda conferida/, // 101
@@ -115,4 +116,63 @@ export function combineStatus(wmsStatus, carrierStatus) {
   const candidates = [wmsStatus, carrierStatus].filter(Boolean);
   if (candidates.length === 0) return "amber";
   return candidates.reduce((worst, s) => (order[s] < order[worst] ? s : worst));
+}
+
+// ---------------------------------------------------------------------------
+// Envelhecimento: pedido parado tempo demais
+// ---------------------------------------------------------------------------
+//
+// Por que isso e necessario: as regras acima olham o ULTIMO evento conhecido.
+// Um pedido que foi coletado e nunca mais se mexeu tem, como ultimo evento,
+// "Encomenda coletada" -- um evento bom. Sem envelhecimento ele ficaria VERDE
+// para sempre, e o quadro esconderia justamente o caso mais comum e mais caro
+// da operacao: o pedido esquecido. Nao e um evento de erro que denuncia esse
+// pedido, e o silencio.
+//
+// A contagem e em DIAS UTEIS (ver src/lib/diasUteis.js). Dia corrido acusaria
+// atraso em todo fim de semana e feriado prolongado.
+
+import { diasUteisDesde } from "./diasUteis.js";
+
+// Eventos que encerram a vida do pedido: depois deles o silencio e esperado,
+// entao envelhecer seria errado -- um pedido entregue fica verde para sempre.
+const FINAL_PATTERNS = [/entrega realizada/, /(pedido|objeto|encomenda) entregue/];
+
+export function ehEventoFinal(texto) {
+  if (!texto) return false;
+  const t = normalizar(texto);
+  return FINAL_PATTERNS.some((re) => re.test(t));
+}
+
+export function limitesDeEnvelhecimento() {
+  return {
+    aviso: Number(process.env.DIAS_UTEIS_AVISO || 5),
+    problema: Number(process.env.DIAS_UTEIS_PROBLEMA || 10),
+  };
+}
+
+/**
+ * Piora o status de um pedido que parou de dar noticias.
+ *
+ * So piora, nunca melhora: um pedido ja vermelho continua vermelho, e um
+ * pedido entregue nunca envelhece.
+ *
+ * @returns {{status, diasParados, motivo: string|null}}
+ */
+export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento, agora = new Date() }) {
+  const semMudanca = { status, diasParados: 0, motivo: null };
+  if (!lastEventAt) return semMudanca;
+  if (ehEventoFinal(rotuloUltimoEvento)) return semMudanca; // entregue: fim da linha
+  if (status === "red") return { ...semMudanca, diasParados: diasUteisDesde(lastEventAt, agora) };
+
+  const diasParados = diasUteisDesde(lastEventAt, agora);
+  const { aviso, problema } = limitesDeEnvelhecimento();
+
+  if (diasParados >= problema) {
+    return { status: "red", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem nenhum evento novo` };
+  }
+  if (diasParados >= aviso) {
+    return { status: "amber", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem nenhum evento novo` };
+  }
+  return { ...semMudanca, diasParados };
 }

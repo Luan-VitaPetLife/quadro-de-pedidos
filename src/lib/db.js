@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,11 +75,32 @@ const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
 function rowToOrder(r) {
   if (!r) return null;
+
+  // O envelhecimento e calculado AQUI, na leitura -- nao na gravacao.
+  //
+  // Isso e essencial: o gatilho do envelhecimento e a AUSENCIA de eventos.
+  // Um pedido parado, por definicao, nao recebe webhook nenhum, e a
+  // sincronizacao de reforco so regrava quando algo mudou. Se a cor fosse
+  // decidida na gravacao, o pedido esquecido nunca seria reavaliado e ficaria
+  // verde para sempre -- exatamente o caso que a regra existe para pegar.
+  // Calculando na leitura, o quadrado amarela sozinho com o passar dos dias,
+  // sem depender de nada acontecer.
+  const envelhecido = aplicarEnvelhecimento({
+    status: r.status,
+    lastEventAt: r.last_event_at,
+    rotuloUltimoEvento: r.carrier_status,
+  });
+
   return {
     orderNumber: r.order_number,
     brand: r.brand,
     customer: r.customer,
-    status: r.status,
+    status: envelhecido.status,
+    // statusBase: a cor que veio dos eventos, antes do envelhecimento. Guardar
+    // as duas deixa o painel explicar POR QUE o quadrado mudou de cor.
+    statusBase: r.status,
+    diasParados: envelhecido.diasParados,
+    motivoStatus: envelhecido.motivo,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
     wmsStatus: r.wms_status,
     carrierStatus: r.carrier_status,

@@ -262,3 +262,16 @@ header.top .sync .dot {
 .field:first-of-type { border-top: none; }
 .field .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); margin-bottom: 3px; }
 .field .v { font-size: 13.5px; }
+
+/* Explicacao de por que o quadrado esta amarelo/vermelho por tempo parado --
+   sem isso a pessoa ve a cor mudar e nao sabe o motivo. */
+.motivo {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  margin: 0 0 14px;
+}
