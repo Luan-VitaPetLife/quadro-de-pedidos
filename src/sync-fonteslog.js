@@ -11,7 +11,7 @@
 // Quando a sessao expirar, ele avisa e voce roda `npm run fonteslog-login`.
 
 import "dotenv/config";
-import { buscarPedidos, ultimoMovimento } from "./integrations/fonteslog.js";
+import { buscarPedidos, buscarPedidosParados, buscarPedidosRejeitados, ultimoMovimento } from "./integrations/fonteslog.js";
 import { mapFontesLogStatus } from "./lib/statusMapping.js";
 
 const CORES = { green: "VERDE", amber: "AMARELO", red: "VERMELHO" };
@@ -55,13 +55,67 @@ async function main() {
     console.log(`  ${String(total).padStart(3)}  ${String(status).padEnd(26)} -> ${CORES[cor]}`);
   }
 
-  const payload = {
-    pedidos: pedidos.map((p) => ({
+  // ---------------------------------------------------------------------
+  // As telas de PROBLEMA, que e o motivo do quadro existir.
+  //
+  // A tela de Rastreamento mostra o status seco ("EM SEPARACAO"). Ja Pedidos
+  // Parados e Pedidos Rejeitados trazem o MOTIVO -- e o motivo e exatamente o
+  // que a pessoa precisa ler pra ir resolver. Por isso essas duas telas
+  // SOBRESCREVEM o que veio do rastreamento.
+  // ---------------------------------------------------------------------
+  const porPedido = new Map();
+  for (const p of pedidos) {
+    porPedido.set(p.numeroPedido, {
       numeroPedido: p.numeroPedido,
       status: p.status,
+      severidade: null, // deixa mapFontesLogStatus decidir pelo status seco
       ultimoMovimento: ultimoMovimento(p),
-    })),
-  };
+    });
+  }
+
+  let parados = [];
+  let rejeitados = [];
+  try {
+    [parados, rejeitados] = await Promise.all([
+      buscarPedidosParados({ dataDe: inicio, dataAte: hoje }),
+      buscarPedidosRejeitados({ dataDe: inicio, dataAte: hoje }),
+    ]);
+  } catch (err) {
+    if (err.message === "SESSAO_EXPIRADA") throw err;
+    console.log(`  (aviso: nao consegui ler as telas de parados/rejeitados: ${err.message})`);
+  }
+
+  for (const p of parados) {
+    const anterior = porPedido.get(p.numeroPedido) || { numeroPedido: p.numeroPedido };
+    porPedido.set(p.numeroPedido, {
+      ...anterior,
+      status: p.motivo ? `PARADO — ${p.motivo}` : "PARADO",
+      severidade: "amber", // aviso em aberto: alguem precisa resolver
+      ultimoMovimento: anterior.ultimoMovimento || null,
+    });
+  }
+
+  for (const p of rejeitados) {
+    const anterior = porPedido.get(p.numeroPedido) || { numeroPedido: p.numeroPedido };
+    porPedido.set(p.numeroPedido, {
+      ...anterior,
+      status: p.observacoes ? `REJEITADO — ${p.observacoes}` : "REJEITADO",
+      severidade: "red", // o WMS recusou: esse pedido nao vai ser separado
+      ultimoMovimento: anterior.ultimoMovimento || null,
+    });
+  }
+
+  if (parados.length || rejeitados.length) {
+    console.log("");
+    console.log(`Telas de problema: ${parados.length} parado(s), ${rejeitados.length} rejeitado(s).`);
+    for (const p of [...parados, ...rejeitados].slice(0, 10)) {
+      console.log(`  ${String(p.numeroPedido).padEnd(14)} ${p.motivo || p.observacoes || "(sem motivo informado)"}`);
+    }
+  } else {
+    console.log("\nTelas de problema: nenhum pedido parado ou rejeitado no periodo.");
+  }
+
+  const payload = { pedidos: [...porPedido.values()] };
 
   if (seco) {
     console.log("\n--seco: nao gravei nada. Amostra do que seria enviado:");

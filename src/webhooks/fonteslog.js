@@ -36,10 +36,16 @@ export async function handleFontesLog(req, res) {
     // So mandamos os campos do WMS. O db.js recalcula a cor final combinando
     // com o que a Mandae ja souber do mesmo pedido -- e por isso que o pedido
     // aparece como UM quadrado, e nao dois.
+    // A severidade pode vir decidida da origem (`severidade`). Isso existe
+    // porque as telas de Parados e Rejeitados trazem um MOTIVO em texto livre,
+    // que vai junto no rotulo -- e deduzir a cor de um texto livre e pedir
+    // acidente: "PARADO: falta de estoque" casaria com a regra de "falta" e
+    // viraria vermelho, quando parado e amarelo. Quem leu a tela sabe a cor;
+    // mapFontesLogStatus fica so para o status seco do rastreamento.
     upsertOrder({
       orderNumber,
       wmsStatus: p.status || null,
-      wmsSeverity: mapFontesLogStatus(p.status),
+      wmsSeverity: p.severidade || mapFontesLogStatus(p.status),
       lastEventAt: p.ultimoMovimento || undefined,
     });
     gravados++;

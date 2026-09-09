@@ -65,43 +65,54 @@ function limpar(html) {
 }
 
 /**
- * Extrai as linhas da tabela de rastreamento.
- * Devolve objetos com as colunas nomeadas, na ordem em que o portal as manda.
+ * Le QUALQUER uma das tabelas do portal e devolve as linhas ja mapeadas por
+ * NOME de coluna, nao por posicao.
+ *
+ * Mapear por nome importa porque as telas nao usam a mesma ordem: em
+ * Rastreamento o "Numero Pedido" e a primeira coluna; em Pedidos Rejeitados e
+ * a ULTIMA. Por posicao, um ajuste de layout da DDS trocaria os dados de lugar
+ * em silencio -- e a gente so descobriria pelo quadro exibindo bobagem.
  */
-export function parsearRastreamento(html) {
-  if (/frmLoginCliente|frmLoginArmazem/.test(html)) {
-    throw new Error("SESSAO_EXPIRADA");
-  }
+export function parsearTabela(html) {
+  if (/frmLoginCliente|frmLoginArmazem/.test(html)) throw new Error("SESSAO_EXPIRADA");
 
   const tabela = (html.match(/<table[\s\S]*?<\/table>/i) || [])[0];
   if (!tabela) return [];
 
+  const colunas = [...tabela.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)]
+    .map((m) => chave(limpar(m[1])))
+    .filter(Boolean);
+
   const corpo = (tabela.match(/<tbody[\s\S]*?<\/tbody>/i) || [""])[0];
-  const linhas = [...corpo.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+  const linhas = [];
 
-  const pedidos = [];
-  for (const [, conteudo] of linhas) {
+  for (const [, conteudo] of corpo.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
     const celulas = [...conteudo.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => limpar(m[1]));
-    if (celulas.length < 6) continue; // linha de "sem registros" e afins
-
-    const [numeroPedido, status, cliente, notaFiscal, emissao, recepcao, separacao, inicioConf, fimConf, expedicao, previsaoSla] = celulas;
-    if (!numeroPedido) continue;
-
-    pedidos.push({
-      numeroPedido,
-      status,
-      cliente,
-      notaFiscal,
-      emissao,
-      recepcao,
-      separacao,
-      inicioConferencia: inicioConf,
-      fimConferencia: fimConf,
-      expedicao,
-      previsaoSla,
+    if (celulas.length < 2) continue; // pula a linha "Sem registros na tabela"
+    const registro = {};
+    colunas.forEach((nome, i) => {
+      registro[nome] = celulas[i] ?? "";
     });
+    linhas.push(registro);
   }
-  return pedidos;
+  return linhas;
+}
+
+/** "Numero Pedido" -> numeroPedido | "Data/Hora da Recepcao" -> dataHoraDaRecepcao */
+function chave(rotulo) {
+  const limpo = rotulo
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^A-Za-z0-9 ]/g, " ")
+    .trim();
+  if (!limpo) return "";
+  const partes = limpo.split(/\s+/);
+  return partes[0].toLowerCase() + partes.slice(1).map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join("");
+}
+
+/** A tela de rastreamento e so uma das tabelas; mantido pelo nome de antes. */
+export function parsearRastreamento(html) {
+  return parsearTabela(html).filter((l) => l.numeroPedido);
 }
 
 /**
@@ -156,4 +167,68 @@ export async function buscarPedidos({ dataDe, dataAte, status = "TODOS" } = {}) 
   if (!res.ok) throw new Error(`FontesLog respondeu ${res.status}`);
 
   return parsearRastreamento(await res.text());
+}
+
+/** GET autenticado numa tela do portal, ja tratando sessao morta. */
+async function buscarTela(rota, params) {
+  const cookie = carregarCookies();
+  const res = await fetch(`${BASE()}${rota}?${new URLSearchParams(params)}`, {
+    headers: { Cookie: cookie, "User-Agent": "Mozilla/5.0 (quadro-de-pedidos)" },
+    redirect: "manual",
+  });
+  // O portal responde 302 para "/" quando a sessao morreu.
+  if (res.status >= 300 && res.status < 400) throw new Error("SESSAO_EXPIRADA");
+  if (!res.ok) throw new Error(`FontesLog respondeu ${res.status} em ${rota}`);
+  return parsearTabela(await res.text());
+}
+
+/**
+ * Pedidos PARADOS: o armazem travou o pedido e registrou um MOTIVO.
+ *
+ * Essa tela e a unica que diz POR QUE o pedido travou -- a de Rastreamento
+ * mostraria so o status seco. E o motivo e justamente o que a pessoa precisa
+ * ler pra ir resolver.
+ *
+ * Colunas: Numero Pedido, Data/Hora da Recepcao, Cliente, Qtde Itens,
+ *          Nota Fiscal, Serie NF, Motivo
+ */
+export async function buscarPedidosParados({ dataDe, dataAte } = {}) {
+  const linhas = await buscarTela("/Pedido/PedidosParados", {
+    idCliente: ID_CLIENTE(),
+    dataDe: paraISO(dataDe),
+    dataAte: paraISO(dataAte),
+  });
+  return linhas
+    .filter((l) => l.numeroPedido)
+    .map((l) => ({
+      numeroPedido: l.numeroPedido,
+      motivo: l.motivo || "",
+      notaFiscal: l.notaFiscal || "",
+      recepcao: l.dataHoraDaRecepcao || "",
+    }));
+}
+
+/**
+ * Pedidos REJEITADOS: o WMS recusou o pedido -- ele nao vai ser separado.
+ *
+ * ATENCAO ao layout: aqui o "Numero Pedido" e a ULTIMA coluna, e a primeira e
+ * o "Codigo". Por isso o parser mapeia por nome de cabecalho.
+ *
+ * Colunas: Codigo, Data/Hora Processamento, CNPJ Emitente, Emitente,
+ *          Nota Fiscal, Serie NF, Observacoes, Numero Pedido
+ */
+export async function buscarPedidosRejeitados({ dataDe, dataAte } = {}) {
+  const linhas = await buscarTela("/Pedido/PedidosRejeitados", {
+    idCliente: ID_CLIENTE(),
+    dataDe: paraISO(dataDe),
+    dataAte: paraISO(dataAte),
+  });
+  return linhas
+    .filter((l) => l.numeroPedido)
+    .map((l) => ({
+      numeroPedido: l.numeroPedido,
+      observacoes: l.observacoes || "",
+      notaFiscal: l.notaFiscal || "",
+      processamento: l.dataHoraProcessamento || "",
+    }));
 }
