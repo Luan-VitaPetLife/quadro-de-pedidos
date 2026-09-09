@@ -89,6 +89,7 @@ function rowToOrder(r) {
     status: r.status,
     lastEventAt: r.last_event_at,
     rotuloUltimoEvento: r.carrier_status,
+    wmsStatus: r.wms_status,
   });
 
   return {

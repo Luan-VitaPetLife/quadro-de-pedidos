@@ -6,6 +6,7 @@ import { listOrders, getMeta, dataDir, dataDirSource } from "./lib/db.js";
 import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
+import { handleFontesLog } from "./webhooks/fonteslog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -57,6 +58,9 @@ app.post("/api/sync", async (req, res) => {
 // "X-Mandae-Secret" com o valor de MANDAE_WEBHOOK_SECRET.
 app.post("/webhooks/mandae/item-processado", handleItemProcessado);
 app.post("/webhooks/mandae/rastreamento", handleRastreamento);
+
+// Recebe o que o script local leu do WMS da FontesLog (ver src/sync-fonteslog.js).
+app.post("/webhooks/fonteslog", handleFontesLog);
 
 /**
  * Confere na subida o que so daria erro (ou pior: silencio) muito depois.
