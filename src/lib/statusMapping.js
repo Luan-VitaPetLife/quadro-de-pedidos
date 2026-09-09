@@ -93,18 +93,35 @@ export function mapMandaeEvent(event) {
   return { status, label: event.name || event.description };
 }
 
-// Status vindos do WMS (FontesLog) -- ajustar assim que soubermos os rotulos reais
-// que o portal usa (ver src/explore-fonteslog.js).
+// Status vindos do WMS (FontesLog).
+//
+// Vocabulario REAL, lido da tela de Rastreamento do portal (nao da documentacao):
+// EXPEDIDO, AGUARDANDO EXPEDICAO, EM SEPARACAO, CANCELADA -- e, pelo painel do
+// Dashboard, tambem existem RECEBIDO, EM CONFERENCIA, CONFERIDO, PARADO e
+// REJEITADO.
+//
+// Sobre AGUARDANDO EXPEDICAO ficar verde: e uma etapa normal do fluxo (o pedido
+// foi separado e conferido, esta esperando a transportadora coletar), nao um
+// problema. Um pedido que EMPACA nesse estado e pego pela regra de
+// envelhecimento (aplicarEnvelhecimento), que olha o tempo parado -- nao faz
+// sentido pintar de amarelo desde o primeiro minuto so porque o rotulo comeca
+// com "aguardando".
 export function mapFontesLogStatus(rawStatus) {
   if (!rawStatus) return null;
   const s = normalizar(rawStatus);
-  if (s.includes("cancel") || s.includes("erro") || s.includes("falta") || s.includes("divergen")) {
-    return "red";
-  }
-  if (s.includes("pendente") || s.includes("aguardando") || s.includes("analise")) {
-    return "amber";
-  }
-  return "green";
+
+  // Problema declarado pelo armazem: o pedido nao vai sair sozinho.
+  if (/cancel|rejeit|erro|divergen|falta|avaria|bloque/.test(s)) return "red";
+
+  // "PARADO" e um status proprio do WMS: o armazem marcou que travou.
+  if (/parado|impediment|pendente|analise/.test(s)) return "amber";
+
+  // Fluxo normal: recebido -> em separacao -> em/pos conferencia ->
+  // aguardando expedicao -> expedido.
+  if (/recebid|separacao|conferenc|conferid|aguardando expedicao|expedid/.test(s)) return "green";
+
+  // Rotulo novo que ainda nao conhecemos: amarelo, o padrao seguro.
+  return "amber";
 }
 
 /**
@@ -144,6 +161,26 @@ export function ehEventoFinal(texto) {
   return FINAL_PATTERNS.some((re) => re.test(t));
 }
 
+/**
+ * O WMS tambem tem um "fim da linha", e ele nao e a entrega.
+ *
+ * Depois de EXPEDIDO, o pedido saiu do armazem: a FontesLog nao vai registrar
+ * mais nada, e o destino dele passa a ser assunto da transportadora. Sem essa
+ * regra, todo pedido expedido ha mais de 5 dias uteis envelhecia e virava
+ * vermelho -- o quadro ficava com uma parede de alarme falso onde estao
+ * justamente os pedidos que o armazem despachou direitinho.
+ *
+ * CANCELADA tambem encerra: nao ha o que esperar de um pedido cancelado (a cor
+ * dele ja e vermelha por conta propria).
+ */
+const WMS_FINAL = [/expedid/, /cancel/];
+
+export function ehStatusWmsFinal(status) {
+  if (!status) return false;
+  const s = normalizar(status);
+  return WMS_FINAL.some((re) => re.test(s));
+}
+
 export function limitesDeEnvelhecimento() {
   return {
     aviso: Number(process.env.DIAS_UTEIS_AVISO || 5),
@@ -159,10 +196,16 @@ export function limitesDeEnvelhecimento() {
  *
  * @returns {{status, diasParados, motivo: string|null}}
  */
-export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento, agora = new Date() }) {
+export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento, wmsStatus, agora = new Date() }) {
   const semMudanca = { status, diasParados: 0, motivo: null };
   if (!lastEventAt) return semMudanca;
   if (ehEventoFinal(rotuloUltimoEvento)) return semMudanca; // entregue: fim da linha
+
+  // Expedido pelo armazem e sem nenhuma noticia da transportadora: o WMS
+  // cumpriu o papel dele e nao tem mais o que registrar. Quem manda no relogio
+  // a partir daqui e a Mandae -- e enquanto ela nao trouxer o primeiro evento,
+  // nao ha silencio a cobrar de ninguem.
+  if (ehStatusWmsFinal(wmsStatus) && !rotuloUltimoEvento) return semMudanca;
   if (status === "red") return { ...semMudanca, diasParados: diasUteisDesde(lastEventAt, agora) };
 
   const diasParados = diasUteisDesde(lastEventAt, agora);
