@@ -5,7 +5,7 @@
   "description": "Radar de pedidos Vita Pet Life - sincroniza FontesLog (WMS) e Mandae e mostra o status de cada pedido em um quadro colorido.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node src/server.js",
