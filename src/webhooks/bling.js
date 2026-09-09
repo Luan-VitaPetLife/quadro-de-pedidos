@@ -29,7 +29,23 @@ function limparStatesVelhos() {
 // qualquer visitante poderia disparar (ou refazer) a autorizacao.
 export function handleAutorizar(req, res) {
   if (!verifyMandaeWebhook(req)) {
-    return res.status(401).send("Acesse com ?s=<MANDAE_WEBHOOK_SECRET> no final da URL.");
+    // Distinguir "faltou" de "esta errado" evita a volta inteira ao suporte.
+    // O engano mais comum e colar a URL de exemplo com a palavra SEGREDO no
+    // lugar do valor -- entao esse caso ganha aviso proprio.
+    const informado = req.query?.s;
+    let motivo;
+    if (!informado) {
+      motivo = "Faltou o ?s= no final da URL.";
+    } else if (/^(SEGREDO|SEU_SEGREDO|MANDAE_WEBHOOK_SECRET|<.*>)$/i.test(String(informado))) {
+      motivo =
+        "Voce colou a palavra de exemplo em vez do valor. Substitua por aquilo que esta " +
+        "em MANDAE_WEBHOOK_SECRET (o mesmo valor que voce configurou no painel da Mandae).";
+    } else {
+      motivo = "O valor do ?s= nao confere com o MANDAE_WEBHOOK_SECRET configurado no servidor.";
+    }
+    return res
+      .status(401)
+      .send(`<h2>Nao autorizado</h2><p>${motivo}</p><p style="color:#666;font-size:13px">Formato: /bling/autorizar?s=VALOR_DO_SEGREDO</p>`);
   }
   limparStatesVelhos();
   const state = crypto.randomBytes(16).toString("hex");
@@ -44,7 +60,7 @@ export async function handleCallback(req, res) {
   if (!state || !statesPendentes.has(state)) {
     return res
       .status(400)
-      .send("Autorizacao invalida ou expirada (state nao confere). Comece de novo por /bling/autorizar?s=SEGREDO");
+      .send("Autorizacao invalida ou expirada (state nao confere). Comece de novo por /bling/autorizar?s= seguido do valor do segredo.");
   }
   statesPendentes.delete(state);
 
@@ -72,7 +88,7 @@ export async function handleCallback(req, res) {
 export function handleStatus(req, res) {
   if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
   const t = lerTokens();
-  if (!t) return res.json({ autorizado: false, comoResolver: "abra /bling/autorizar?s=SEGREDO" });
+  if (!t) return res.json({ autorizado: false, comoResolver: "abra /bling/autorizar?s= seguido do valor de MANDAE_WEBHOOK_SECRET" });
   res.json({
     autorizado: true,
     obtidoEm: t.obtidoEm,
