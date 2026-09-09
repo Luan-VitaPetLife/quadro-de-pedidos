@@ -1,15 +1,14 @@
-// Integracao com o portal da FontesLog (WMS): http://portalfonteslog.ddsinformatica.com.br/
+// Integracao com o portal da FontesLog (WMS): "DDS WMS - Portal de Consulta"
+// (http://portalfonteslog.ddsinformatica.com.br/).
 //
 // AINDA NAO TERMINADA DE PROPOSITO: a FontesLog nao tem API publica, entao a
-// unica forma de puxar status daqui e automatizando o navegador (Playwright) --
-// mas isso exige conhecer a estrutura real das paginas do portal (nomes dos
-// campos de login, como a lista de pedidos aparece, quais textos de status
-// eles usam). Ninguem aqui (nem o Claude) navegou pelo portal ainda.
-//
-// Passo 1: rode `npm run explore-fonteslog` (ver src/explore-fonteslog.js).
-// Isso faz login com as credenciais do .env e salva um screenshot + o HTML da
-// pagina em data/fonteslog-debug/. A partir dali da pra descobrir os seletores
-// certos e preencher as funcoes abaixo.
+// unica forma de puxar status daqui e automatizando o navegador (Playwright).
+// Ja sabemos o formulario de login (ver `npm run explore-fonteslog`): um
+// seletor "Tipo de Acesso" que precisa ser marcado como "Cliente", e os
+// campos "CPF/CNPJ do Tomador" / "Senha do Tomador" + botao "Entrar". Falta
+// mapear como a lista/consulta de pedidos aparece depois de logado -- rode
+// `npm run explore-fonteslog` e me mande o resultado (screenshot/HTML em
+// data/fonteslog-debug/) pra terminarmos fetchOrderStatus() abaixo.
 
 import { chromium } from "playwright";
 
@@ -24,6 +23,20 @@ export async function withFontesLogPage(callback) {
   }
 }
 
+// Tenta uma lista de estrategias de localizacao, na ordem, e usa a primeira
+// que encontrar algo na pagina -- resiliente a pequenas diferencas no HTML
+// real (label vs placeholder vs texto solto etc.).
+async function firstMatch(page, locators) {
+  for (const loc of locators) {
+    try {
+      if ((await loc.count()) > 0) return loc.first();
+    } catch {
+      // ignora e tenta o proximo
+    }
+  }
+  return null;
+}
+
 export async function login(page) {
   const url = process.env.FONTESLOG_URL;
   const loginValue = process.env.FONTESLOG_LOGIN;
@@ -34,12 +47,34 @@ export async function login(page) {
 
   await page.goto(url, { waitUntil: "networkidle" });
 
-  // TODO: confirmar os seletores reais depois de rodar `npm run explore-fonteslog`.
-  // Estes sao um chute razoavel baseado em portais DDS Informatica comuns --
-  // ajustar assim que virmos o HTML real.
-  const userField = page.locator('input[type="text"], input[name*="login" i], input[name*="usuario" i]').first();
-  const passField = page.locator('input[type="password"]').first();
-  const submitButton = page.locator('button[type="submit"], input[type="submit"]').first();
+  // "Tipo de Acesso": Armazem / Cliente -- precisa marcar Cliente.
+  const clienteRadio = await firstMatch(page, [
+    page.getByRole("radio", { name: /cliente/i }),
+    page.getByLabel(/cliente/i),
+    page.locator('input[type="radio"]').nth(1),
+  ]);
+  if (clienteRadio) {
+    await clienteRadio.check({ force: true }).catch(() => clienteRadio.click());
+  }
+
+  const userField = await firstMatch(page, [
+    page.getByPlaceholder(/cpf\/cnpj/i),
+    page.getByLabel(/cpf\/cnpj/i),
+    page.locator('input[type="text"], input[type="tel"]').first(),
+  ]);
+  const passField = await firstMatch(page, [
+    page.getByPlaceholder(/senha/i),
+    page.getByLabel(/senha/i),
+    page.locator('input[type="password"]').first(),
+  ]);
+  const submitButton = await firstMatch(page, [
+    page.getByRole("button", { name: /entrar/i }),
+    page.locator('button[type="submit"], input[type="submit"]'),
+  ]);
+
+  if (!userField || !passField || !submitButton) {
+    throw new Error("Nao encontrei os campos de login esperados (CPF/CNPJ, senha ou botao Entrar) -- portal pode ter mudado.");
+  }
 
   await userField.fill(loginValue);
   await passField.fill(senha);
