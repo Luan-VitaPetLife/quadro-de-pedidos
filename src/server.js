@@ -11,6 +11,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(express.json());
+
+// O quadro esta publico de proposito (decisao de operacao: sem senha, pra
+// qualquer pessoa do time abrir direto). Isso NAO significa que ele deva
+// aparecer no Google -- o noindex evita que buscadores indexem a URL e os
+// dados de pedido junto com ela. Tirar daqui se um dia quiser o oposto.
+app.use((req, res, next) => {
+  res.set("X-Robots-Tag", "noindex, nofollow");
+  next();
+});
+app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /\n"));
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/api/orders", (req, res) => {
@@ -47,8 +58,31 @@ app.post("/api/sync", async (req, res) => {
 app.post("/webhooks/mandae/item-processado", handleItemProcessado);
 app.post("/webhooks/mandae/rastreamento", handleRastreamento);
 
+/**
+ * Confere na subida o que so daria erro (ou pior: silencio) muito depois.
+ * Roda uma vez, escreve no log do Railway e nao derruba o processo.
+ */
+function checarConfiguracao() {
+  if (!process.env.MANDAE_TOKEN) {
+    console.warn("[config] MANDAE_TOKEN vazio -- a sincronizacao de reforco vai falhar em todo pedido.");
+  }
+  if (!process.env.MANDAE_WEBHOOK_SECRET) {
+    console.warn(
+      "[config] MANDAE_WEBHOOK_SECRET vazio -- os webhooks estao ACEITANDO QUALQUER CHAMADA. " +
+        "Qualquer pessoa que descubra a URL consegue inventar pedidos no quadro. Defina a variavel."
+    );
+  }
+  if (!process.env.DATA_DIR && process.env.RAILWAY_ENVIRONMENT) {
+    console.warn(
+      "[config] Rodando no Railway sem DATA_DIR -- o banco esta no disco efemero e VAI SUMIR no proximo deploy. " +
+        "Crie um Volume e aponte DATA_DIR para o mount path dele."
+    );
+  }
+}
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`[server] Radar de pedidos rodando em http://localhost:${port}`);
+  console.log(`[server] Radar de pedidos rodando na porta ${port}`);
+  checarConfiguracao();
   startScheduler();
 });

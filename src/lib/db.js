@@ -5,10 +5,18 @@ import { fileURLToPath } from "node:url";
 import { combineStatus } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, "..", "..", "data");
+
+// Onde fica o arquivo do banco. Local: a pasta data/ do projeto. No Railway,
+// o disco do container e efemero -- tudo fora de um Volume some a cada deploy.
+// Por isso DATA_DIR existe: aponte-o para o mount path do Volume (ex.: /app/data)
+// e o banco sobrevive aos deploys. Sem essa variavel, cai no padrao local.
+const dataDir = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, "..", "..", "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = path.join(dataDir, "orders.sqlite");
+console.log(`[db] banco em ${dbPath}`);
 export const db = new Database(dbPath);
 // Obs.: journal_mode = WAL exige mmap/locking que alguns discos de rede ou
 // pastas sincronizadas (OneDrive, bridges de VM, etc.) nao suportam bem.
