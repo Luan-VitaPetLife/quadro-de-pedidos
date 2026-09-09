@@ -3,6 +3,8 @@ node_modules/
 data/*.sqlite
 data/*.sqlite-journal
 data/fonteslog-debug/
+# sessao autenticada do portal FontesLog -- vale como senha, nunca comitar
+data/fonteslog-sessao.json
 npm-debug.log*
 .DS_Store
 

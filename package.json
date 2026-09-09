@@ -13,7 +13,8 @@
     "explore-fonteslog": "node src/explore-fonteslog.js",
     "dev": "node --watch src/server.js",
     "check-mandae": "node src/check-mandae.js",
-    "testar-pedido": "node src/testar-pedido.js"
+    "testar-pedido": "node src/testar-pedido.js",
+    "fonteslog-login": "node src/fonteslog-login.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
