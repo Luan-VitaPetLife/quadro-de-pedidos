@@ -125,6 +125,21 @@ export async function handleDiagnostico(req, res) {
       amostra.push({ extraido: extrairDoPedido(det), temTransporte: !!det?.transporte });
     }
 
+    // Mapa numero x numeroLoja x rastreio. E o que revela QUAL dos dois numeros
+    // o WMS usa como "Numero Pedido" -- coisa que nao da pra deduzir, so
+    // comparando com os numeros que ja estao no quadro.
+    const mapa = [];
+    for (const p of lista.slice(0, 25)) {
+      const det = await detalhePedido(p.id);
+      mapa.push({
+        numero: det?.numero ?? null,
+        numeroLoja: det?.numeroLoja ?? null,
+        loja: det?.loja?.id ?? null,
+        transportadora: det?.transporte?.contato?.nome ?? null,
+        rastreio: (det?.transporte?.volumes || []).map((v) => v?.codigoRastreamento).find(Boolean) || null,
+      });
+    }
+
     const primeiroDetalhe = await detalhePedido(lista[0].id);
 
     res.json({
@@ -134,6 +149,7 @@ export async function handleDiagnostico(req, res) {
       transporteCru: primeiroDetalhe?.transporte ?? null,
       amostraExtraida: amostra,
       quantosComRastreio: amostra.filter((a) => a.extraido?.trackingCode).length,
+      mapa,
     });
   } catch (err) {
     res.status(500).json({ erro: err.message });
