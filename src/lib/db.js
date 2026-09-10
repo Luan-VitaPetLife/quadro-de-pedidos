@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -111,10 +111,20 @@ function rowToOrder(r) {
     carrierStatus: r.carrier_status,
   });
 
+  // A cor base e recalculada na LEITURA, nao herdada da gravacao: a regra do
+  // handover depende dos rotulos das duas fontes, e recalcular aqui faz os
+  // registros antigos se corrigirem sozinhos, sem precisar reescrever o banco.
+  const base = combinarComHandover({
+    wmsSeverity: r.wms_severity,
+    wmsStatus: r.wms_status,
+    carrierSeverity: r.carrier_severity,
+    carrierStatus: r.carrier_status,
+  });
+
   const envelhecido = naoAcompanhado
     ? { status: "green", diasParados: 0, motivo: null }
     : aplicarEnvelhecimento({
-        status: r.status,
+        status: base,
         lastEventAt: r.last_event_at,
         rotuloUltimoEvento: r.carrier_status,
         wmsStatus: r.wms_status,
@@ -154,7 +164,7 @@ function rowToOrder(r) {
     status: statusFinal,
     // statusBase: a cor que veio dos eventos, antes do envelhecimento. Guardar
     // as duas deixa o painel explicar POR QUE o quadrado mudou de cor.
-    statusBase: r.status,
+    statusBase: base,
     diasParados: envelhecido.diasParados,
     motivoStatus: motivo,
     diasAtePrevisao: previsao.diasAtePrevisao,

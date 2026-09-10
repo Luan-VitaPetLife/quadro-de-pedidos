@@ -388,3 +388,40 @@ export function avaliarColeta({ coletaPrevista, rotuloUltimoEvento, agora = new 
     motivo: `Coleta estava prevista para ${rotulo} e nao aconteceu (${atraso} dias uteis)`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// O WMS envelhece quando a transportadora assume
+// ---------------------------------------------------------------------------
+//
+// O papel do armazem acaba na entrega ao caminhao. Depois disso, o status dele
+// e historia -- e o portal nao volta atras pra corrigir: um pedido marcado
+// "PARADO" (parado aguardando coleta) continua PARADO no WMS mesmo depois de
+// coletado.
+//
+// Como a cor era o pior dos dois lados, esse registro velho puxava para
+// amarelo um pedido que a transportadora ja tinha recolhido e estava levando.
+// Caso real: pedido 1460, WMS "PARADO" e Mandae "Encomenda coletada".
+//
+// Só os estados ANTERIORES a entrega envelhecem. CANCELADA e REJEITADO
+// continuam valendo: pedido cancelado que mesmo assim foi despachado e
+// problema de verdade, e dos grandes.
+
+const WMS_ANTES_DA_COLETA = /parado|aguardando|separacao|conferenc|conferid|recebid|impediment/;
+
+function transportadoraTemNoticia(rotulo) {
+  if (!rotulo) return false;
+  const t = normalizar(rotulo);
+  // "Nenhuma atualizacao disponivel" e ausencia de noticia, nao noticia.
+  return !/nenhuma atualizacao/.test(t);
+}
+
+/**
+ * Cor combinada, descartando status do armazem que a transportadora ja
+ * superou.
+ */
+export function combinarComHandover({ wmsSeverity, wmsStatus, carrierSeverity, carrierStatus }) {
+  if (transportadoraTemNoticia(carrierStatus) && wmsStatus && WMS_ANTES_DA_COLETA.test(normalizar(wmsStatus))) {
+    return carrierSeverity || "amber";
+  }
+  return combineStatus(wmsSeverity, carrierSeverity);
+}
