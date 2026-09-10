@@ -9,7 +9,7 @@ import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
 import { handleInvestigar } from "./webhooks/investigar.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
-import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar } from "./webhooks/bling.js";
+import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar, handleSincronizarNotas } from "./webhooks/bling.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -73,6 +73,7 @@ app.get("/bling/status", handleStatus);
 app.get("/bling/diagnostico", handleDiagnostico);
 app.post("/bling/sincronizar", handleSincronizar);
 app.post("/bling/limpar", handleLimpar);
+app.post("/bling/sincronizar-notas", handleSincronizarNotas);
 
 // Rastreia um pedido/cliente nos tres sistemas -- a ferramenta de cacar pedido perdido.
 app.get("/api/investigar", handleInvestigar);

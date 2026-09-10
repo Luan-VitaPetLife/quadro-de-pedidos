@@ -9,6 +9,7 @@
 
 import crypto from "node:crypto";
 import { urlDeAutorizacao, trocarCodePorToken, lerTokens } from "../integrations/bling.js";
+import { getMeta } from "../lib/db.js";
 import { verifyMandaeWebhook } from "./mandae.js";
 
 // O `state` amarra o retorno do Bling ao pedido de autorizacao que NOS
@@ -91,6 +92,11 @@ export function handleStatus(req, res) {
   if (!t) return res.json({ autorizado: false, comoResolver: "abra /bling/autorizar?s= seguido do valor de MANDAE_WEBHOOK_SECRET" });
   res.json({
     autorizado: true,
+    // Quando cada rotina rodou pela ultima vez. Sem isso nao da pra saber se a
+    // sincronizacao de notas chegou a executar -- ela e a ultima da fila e um
+    // deploy no meio a interrompe.
+    ultimaSincronizacaoPedidos: getMeta("lastBlingSyncAt"),
+    ultimaSincronizacaoNotas: getMeta("lastNotasSyncAt"),
     obtidoEm: t.obtidoEm,
     accessTokenValidoAte: new Date(t.expiraEm).toISOString(),
     accessTokenExpirado: Date.now() >= t.expiraEm,
@@ -191,5 +197,31 @@ export async function handleLimpar(req, res) {
     res.json({ ok: true, removidos });
   } catch (err) {
     res.status(500).json({ erro: err.message });
+  }
+}
+
+// POST /bling/sincronizar-notas?s=<segredo>
+//
+// So as notas fiscais. Existe separada porque, no ciclo completo, as notas sao
+// a ultima etapa depois de centenas de chamadas de pedido -- e um deploy no
+// meio interrompe tudo antes de chegar nelas. Assim da pra rodar e conferir a
+// parte de bonificacao sem esperar o resto.
+let notasEmCurso = false;
+
+export async function handleSincronizarNotas(req, res) {
+  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
+  if (notasEmCurso) return res.status(409).json({ error: "ja existe uma sincronizacao de notas em andamento" });
+
+  const dias = Number(req.query?.dias) || 30;
+  notasEmCurso = true;
+  res.json({ ok: true, iniciada: true, dias });
+
+  try {
+    const { runSyncNotas } = await import("../sync-notas.js");
+    await runSyncNotas({ dias });
+  } catch (err) {
+    console.error("[notas] sincronizacao falhou:", err.message);
+  } finally {
+    notasEmCurso = false;
   }
 }
