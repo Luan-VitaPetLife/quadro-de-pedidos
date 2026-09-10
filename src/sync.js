@@ -13,7 +13,7 @@
 // (ver src/integrations/fonteslog.js), ela entra aqui também.
 
 import "dotenv/config";
-import { fetchTracking, latestEvent } from "./integrations/mandae.js";
+import { fetchTracking, latestEvent, coletaPrevista } from "./integrations/mandae.js";
 import { mapMandaeEvent } from "./lib/statusMapping.js";
 import { upsertOrder, listOrders, setMeta } from "./lib/db.js";
 
@@ -34,6 +34,8 @@ async function reconcileOneOrder(order) {
     if (!event) return;
 
     const mapped = mapMandaeEvent(event);
+    // Coleta agendada: a Mandae a devolve disfarcada de evento com data futura.
+    const agendada = coletaPrevista(tracking);
     const lastEventAt = event.timestamp || event.date || order.lastEventAt;
 
     // Nada novo desde o ultimo evento que ja temos -- evita grava-lo de novo
@@ -45,6 +47,7 @@ async function reconcileOneOrder(order) {
       trackingCode: order.trackingCode,
       carrierStatus: mapped.label,
       carrierSeverity: mapped.status,
+      coletaPrevista: agendada,
       lastEventAt,
     });
   } catch (err) {

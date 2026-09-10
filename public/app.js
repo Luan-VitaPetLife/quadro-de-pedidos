@@ -281,6 +281,7 @@ function openPanel(orderNumber) {
   panel.appendChild(campo("Destino", o.city));
   panel.appendChild(campo("Natureza da operação", o.natureza));
   panel.appendChild(campo("Pedido feito em", fmtDate(o.placedAt), true));
+  panel.appendChild(campo("Coleta prevista", o.coletaPrevista ? fmtDate(o.coletaPrevista) : null, true));
   panel.appendChild(campo("Previsão de entrega", o.previsaoEntrega ? fmtDia(o.previsaoEntrega) : null, true));
   panel.appendChild(campo("Última atualização", fmtDate(o.lastEventAt), true));
   panel.appendChild(campo("Dias úteis sem novidade", o.diasParados ?? "—", true));
