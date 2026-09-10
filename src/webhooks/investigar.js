@@ -138,6 +138,11 @@ export async function handleInvestigar(req, res) {
         // Sonda: a nota carrega rastreio/transportadora? So o dado real responde.
         camposDaNota: detalhe ? Object.keys(detalhe) : null,
         transporteDaNota: detalhe?.transporte ?? null,
+        // Sonda: onde exatamente mora o rastreio na nota? O Bling mostra
+        // "Objetos de postagem -> Tracking" na tela, mas a primeira leitura da
+        // API so trouxe volumes:[{id}]. Dump completo pra achar o campo.
+        volumesCrus: detalhe?.transporte?.volumes ?? null,
+        numeroPedidoLoja: detalhe?.numeroPedidoLoja ?? null,
       });
     }
 
