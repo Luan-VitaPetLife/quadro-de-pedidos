@@ -40,7 +40,16 @@ async function reconcileOneOrder(order) {
 
     // Nada novo desde o ultimo evento que ja temos -- evita grava-lo de novo
     // e "empurrar" updatedAt sem necessidade.
-    if (lastEventAt === order.lastEventAt && mapped.status === order.carrierSeverity) return;
+    //
+    // A coleta prevista entra na comparacao de proposito. Ela nao vem de um
+    // evento novo: e a mesma resposta da Mandae lida de outro jeito. Sem isto,
+    // a guarda barrava a gravacao e o campo nunca era preenchido nos pedidos
+    // que ja estavam no quadro -- que sao justamente os que precisavam dele.
+    const mudou =
+      lastEventAt !== order.lastEventAt ||
+      mapped.status !== order.carrierSeverity ||
+      (agendada || null) !== (order.coletaPrevista || null);
+    if (!mudou) return;
 
     upsertOrder({
       orderNumber: order.orderNumber,
