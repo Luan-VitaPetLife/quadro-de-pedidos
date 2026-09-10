@@ -275,3 +275,61 @@ header.top .sync .dot {
   padding: 9px 11px;
   margin: 0 0 14px;
 }
+
+/* ── Períodos ───────────────────────────────────────────────────────────── */
+.periodos {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.periodos .custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.periodos .ate { font-size: 12px; color: var(--ink-soft); }
+.periodos input[type="date"] {
+  border: 1px solid var(--line-strong);
+  background: var(--bg-raised);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color-scheme: light dark; /* deixa o seletor de data seguir o tema */
+}
+
+/* ── Quadrado ───────────────────────────────────────────────────────────── */
+/* Deixou de ser quadrado: o código de rastreio precisa caber numa segunda
+   linha, e espremido em 58px ele viraria reticências sempre. */
+.grid { grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
+.sq {
+  aspect-ratio: auto;
+  min-height: 52px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 6px;
+  position: relative;
+  overflow: hidden;
+}
+.sq .num { font-size: 12px; font-weight: 600; line-height: 1.1; }
+.sq .rast {
+  font-size: 9.5px;
+  font-weight: 500;
+  opacity: 0.75;
+  letter-spacing: -0.01em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sq .num, .sq .rast { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sq .boni { position: absolute; top: 3px; right: 4px; font-size: 9px; line-height: 1; }
+.sq:hover { transform: scale(1.04); }
+
+.boni-tag { border-color: var(--accent); color: var(--accent); }

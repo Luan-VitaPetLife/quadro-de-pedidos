@@ -28,12 +28,26 @@
       <div class="tile red"><div class="n mono" id="cRed">&ndash;</div><div class="l">algo aconteceu</div></div>
     </div>
 
+    <div class="periodos" id="periodos">
+      <button class="chip" data-periodo="hoje" data-active="true">Hoje</button>
+      <button class="chip" data-periodo="ontem">Ontem</button>
+      <button class="chip" data-periodo="semana">Essa semana</button>
+      <button class="chip" data-periodo="mes">Esse m&ecirc;s</button>
+      <button class="chip" data-periodo="tudo">Tudo</button>
+      <span class="custom">
+        <input type="date" id="dataDe" title="De">
+        <span class="ate">at&eacute;</span>
+        <input type="date" id="dataAte" title="At&eacute;">
+      </span>
+    </div>
+
     <div class="controls">
       <div class="filters" id="filters">
         <button class="chip" data-filter="all" data-active="true">Todos</button>
         <button class="chip" data-filter="red"><span class="sw" style="background:var(--red)"></span>Vermelho</button>
         <button class="chip" data-filter="amber"><span class="sw" style="background:var(--amber)"></span>Amarelo</button>
         <button class="chip" data-filter="green"><span class="sw" style="background:var(--green)"></span>Verde</button>
+        <button class="chip" data-filter="bonificacao">&#127873; Bonifica&ccedil;&atilde;o</button>
       </div>
       <div class="filters" id="brandFilters">
         <button class="chip" data-brandfilter="all" data-active="true">Todas as marcas</button>
