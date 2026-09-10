@@ -42,14 +42,14 @@
 
   --neutro: #8b919d;
 
-  --raio: 8px;
-  --raio-p: 5px;
+  --raio: 14px;
+  --raio-p: 10px;
   --sombra: 0 1px 2px rgba(20, 22, 28, .05), 0 6px 20px -14px rgba(20, 22, 28, .3);
 
   /* Ajustáveis pela janela de personalização. */
   --card-largura: 132px;
   --card-altura: 56px;
-  --card-raio: var(--raio);
+  --card-raio: 12px;
   --card-aspecto: auto;
   --card-num: 13px;
   --card-cod: 10px;
@@ -132,15 +132,15 @@ body {
   color: var(--tinta);
   font: inherit;
   font-size: 13px;
-  padding: 7px 13px;
-  border-radius: var(--raio-p);
+  padding: 8px 15px;
+  border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background .12s, border-color .12s;
+  transition: background .16s, border-color .16s, transform .16s;
 }
 .btn:hover { border-color: var(--tinta-fraca); background: var(--painel-2); }
 .btn:disabled { opacity: .55; cursor: default; }
-.btn.icone { padding: 7px 10px; font-size: 15px; line-height: 1; }
+.btn.icone { padding: 8px 11px; font-size: 15px; line-height: 1; }
 .btn.largo { width: 100%; margin-top: 4px; }
 
 /* ── Placar ──────────────────────────────────────────────────────────── */
@@ -194,23 +194,26 @@ body {
 /* Segmented control em vez de pílulas soltas: a forma comunica "escolha uma".
    Pílulas separadas sugerem que dá pra ligar várias ao mesmo tempo. */
 .segmentado {
+  position: relative;
   display: inline-flex;
   background: var(--painel);
   border: 1px solid var(--linha);
-  border-radius: var(--raio-p);
-  padding: 2px;
+  border-radius: 999px;
+  padding: 3px;
   gap: 2px;
   max-width: 100%;
 }
 .segmentado.rolavel { overflow-x: auto; scrollbar-width: thin; }
 .seg {
+  position: relative;
+  z-index: 1;
   border: none;
   background: none;
   color: var(--tinta-media);
   font: inherit;
   font-size: 12.5px;
   padding: 6px 11px;
-  border-radius: 4px;
+  border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex;
@@ -220,7 +223,6 @@ body {
 }
 .seg:hover { background: var(--painel-2); color: var(--tinta); }
 .seg[data-active="true"] {
-  background: var(--tinta);
   color: var(--painel);
   font-weight: 500;
 }
@@ -237,8 +239,8 @@ body {
   border: 1px solid var(--linha);
   background: var(--painel);
   color: var(--tinta);
-  border-radius: var(--raio-p);
-  padding: 6px 9px;
+  border-radius: 999px;
+  padding: 6px 12px;
   font: inherit;
   font-size: 12.5px;
 }
@@ -249,8 +251,8 @@ body {
   border: 1px solid var(--linha);
   background: var(--painel);
   color: var(--tinta);
-  border-radius: var(--raio-p);
-  padding: 7px 11px;
+  border-radius: 999px;
+  padding: 8px 15px;
   font: inherit;
   font-size: 13px;
   min-width: 240px;
@@ -503,3 +505,59 @@ kbd {
 }
 .board-conta { font-size: 12px; color: var(--tinta-fraca); }
 body.tv .board-topo { display: none; }
+
+/* ── Indicador deslizante ────────────────────────────────────────────────
+   O destaque do item ativo é UM elemento que se move, não um fundo que
+   acende em cada botão. A diferença não é enfeite: ver a marca percorrer o
+   caminho mostra de onde a seleção saiu e para onde foi — quando ela só
+   pisca no lugar novo, quem estava lendo outra parte da tela perde a
+   transição e precisa reprocurar onde está. */
+.indicador {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 999px;
+  background: var(--tinta);
+  z-index: 0;
+  transform: translateX(0);
+  transition: transform .28s cubic-bezier(.4, 0, .2, 1), width .28s cubic-bezier(.4, 0, .2, 1);
+  pointer-events: none;
+}
+/* Na primeira pintura ele nasce no lugar certo, sem correr da esquerda. */
+.indicador.sem-transicao { transition: none; }
+
+/* ── Abertura e fechamento dos painéis ───────────────────────────────────
+   Trocamos display:none por visibility+opacity para que exista transição de
+   saída: com display, o painel some no primeiro quadro e o fechamento fica
+   seco. A escala parte de 0.97 e não de 0.8 — o painel se assenta, não
+   explode na tela. */
+.cortina {
+  display: flex;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease, visibility 0s linear .2s;
+}
+.cortina.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity .2s ease, visibility 0s;
+}
+.painel {
+  transform: translateY(14px) scale(.97);
+  opacity: 0;
+  transition: transform .26s cubic-bezier(.2, .8, .3, 1), opacity .2s ease;
+}
+.cortina.open .painel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.sq:active { transform: scale(.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .indicador, .cortina, .painel { transition: none !important; }
+  .painel { transform: none; }
+}
