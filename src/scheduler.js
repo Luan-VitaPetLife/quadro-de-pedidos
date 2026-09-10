@@ -40,8 +40,14 @@ export function startScheduler() {
   // ainda nao existe. Registrar como erro barulhento treinaria a ignorar o log.
   async function rodarBling() {
     try {
+      const dias = Number(process.env.BLING_DIAS || 30);
       const { runSyncBling } = await import("./sync-bling.js");
-      await runSyncBling({ dias: Number(process.env.BLING_DIAS || 30) });
+      await runSyncBling({ dias });
+      // As notas vem DEPOIS dos pedidos: assim o quadrado canonico do pedido ja
+      // existe e a nota so acrescenta natureza/bonificacao nele, em vez de
+      // criar um quadrado paralelo que precisaria ser mesclado.
+      const { runSyncNotas } = await import("./sync-notas.js");
+      await runSyncNotas({ dias });
     } catch (err) {
       if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) {
         console.log("[scheduler] Bling ainda nao autorizado; pulando. (abra /bling/autorizar?s=SEGREDO)");

@@ -42,7 +42,12 @@ export async function runSyncBling({ dias = 30 } = {}) {
       const numeroLoja = detalhe?.numeroLoja ? String(detalhe.numeroLoja).trim() : null;
 
       // Os quadrados que podem ser a MESMA venda entrada por outra porta.
-      const apelidos = [numeroLoja, dados.trackingCode].filter(Boolean);
+      // O numero da NOTA entra como apelido porque a Mandae usa a NF como
+      // referencia do parceiro em varios casos -- e por isso que existiam
+      // quadrados chamados "000222". Sem esse apelido, o mesmo despacho ficava
+      // em dois quadrados: um pelo numero do pedido e outro pelo da nota.
+      const numeroNota = detalhe?.notaFiscal?.numero ? String(detalhe.notaFiscal.numero).trim() : null;
+      const apelidos = [numeroLoja, numeroNota, dados.trackingCode].filter(Boolean);
       const merge = mesclarEmCanonico(canonico, apelidos);
       resumo.mesclados += merge.mesclados;
 
@@ -86,6 +91,9 @@ export async function runSyncBling({ dias = 30 } = {}) {
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
         trackingCode: dados.trackingCode || undefined,
         placedAt: dados.data || undefined,
+        // dataPrevista e a previsao de entrega do Bling. E o que permite dizer
+        // "esse pedido deveria estar a caminho" antes de o prazo estourar.
+        previsaoEntrega: detalhe?.dataPrevista || undefined,
       });
       resumo.atualizados++;
     } catch (err) {

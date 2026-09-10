@@ -159,7 +159,7 @@ export function combineStatus(wmsStatus, carrierStatus) {
 // A contagem e em DIAS UTEIS (ver src/lib/diasUteis.js). Dia corrido acusaria
 // atraso em todo fim de semana e feriado prolongado.
 
-import { diasUteisDesde } from "./diasUteis.js";
+import { diasUteisDesde, dataLocal } from "./diasUteis.js";
 
 // Eventos que encerram a vida do pedido: depois deles o silencio e esperado,
 // entao envelhecer seria errado -- um pedido entregue fica verde para sempre.
@@ -228,4 +228,76 @@ export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento,
     return { status: "amber", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem nenhum evento novo` };
   }
   return { ...semMudanca, diasParados };
+}
+
+// ---------------------------------------------------------------------------
+// Previsao de entrega
+// ---------------------------------------------------------------------------
+//
+// O envelhecimento pega o pedido que parou de dar noticia. Esta regra pega
+// outro caso, que o silencio nao denuncia: o pedido que esta ANDANDO, mas
+// devagar demais pro prazo prometido.
+//
+// Exemplo do Luan: pedido feito em 10/09 com previsao pra 20/09. No dia 18 ele
+// ainda estar "em separacao" nao dispara nenhum alarme hoje -- o ultimo evento
+// e recente e legitimo. Mas ja e um pedido que nao vai chegar na data.
+//
+// A diferenca em relacao ao envelhecimento importa: la o problema e a ausencia
+// de evento; aqui e a data prometida chegando com o pedido no lugar errado.
+
+/** Um pedido "ja saiu" quando a transportadora falou dele ou o WMS expediu. */
+function jaSaiu({ rotuloUltimoEvento, wmsStatus }) {
+  if (rotuloUltimoEvento) return true; // qualquer evento da transportadora ja e despacho
+  return /expedid/.test(normalizar(wmsStatus || ""));
+}
+
+/**
+ * @returns {{status, motivo: string|null, diasAtePrevisao: number|null}}
+ */
+export function avaliarPrevisao({
+  status,
+  previsaoEntrega,
+  rotuloUltimoEvento,
+  wmsStatus,
+  agora = new Date(),
+}) {
+  const inalterado = { status, motivo: null, diasAtePrevisao: null };
+  if (!previsaoEntrega) return inalterado;
+
+  // Pedido entregue nao tem prazo a cumprir -- ja cumpriu.
+  if (ehEventoFinal(rotuloUltimoEvento)) return inalterado;
+
+  const previsao = dataLocal(previsaoEntrega);
+  const hoje = dataLocal(agora);
+  if (!previsao || !hoje) return inalterado;
+
+  // Dias uteis daqui ate a previsao. Negativo quando a data ja passou.
+  const atrasado = previsao < hoje;
+  const diasAtePrevisao = atrasado ? -diasUteisDesde(previsao, agora) : diasUteisDesde(hoje, previsao);
+
+  if (atrasado) {
+    return {
+      status: "red",
+      motivo: `Previsao de entrega era ${previsao.split("-").reverse().join("/")} e o pedido nao foi entregue`,
+      diasAtePrevisao,
+    };
+  }
+
+  // Prazo chegando e o pedido nem saiu do armazem: nao vai dar tempo.
+  const margem = Number(process.env.DIAS_UTEIS_MARGEM_PREVISAO || 2);
+  if (diasAtePrevisao <= margem && !jaSaiu({ rotuloUltimoEvento, wmsStatus })) {
+    return {
+      status: status === "red" ? "red" : "amber",
+      motivo: `Entrega prevista para ${previsao.split("-").reverse().join("/")} e o pedido ainda nao saiu`,
+      diasAtePrevisao,
+    };
+  }
+
+  return { ...inalterado, diasAtePrevisao };
+}
+
+/** Fica com a pior das duas cores. */
+export function pior(a, b) {
+  const ordem = { red: 0, amber: 1, green: 2 };
+  return ordem[a] <= ordem[b] ? a : b;
 }

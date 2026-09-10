@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +49,9 @@ db.exec(`
     wms_severity TEXT,
     carrier_status TEXT,
     carrier_severity TEXT,
+    bonificacao INTEGER,
+    natureza TEXT,
+    previsao_entrega TEXT,
     tracking_code TEXT,
     city TEXT,
     placed_at TEXT,
@@ -70,6 +73,10 @@ if (!existingCols.includes("wms_severity")) {
 if (!existingCols.includes("carrier_severity")) {
   db.exec("ALTER TABLE orders ADD COLUMN carrier_severity TEXT");
 }
+// bonificacao/doacao (vem da Natureza de Operacao da NOTA) e previsao de entrega.
+if (!existingCols.includes("bonificacao")) db.exec("ALTER TABLE orders ADD COLUMN bonificacao INTEGER");
+if (!existingCols.includes("natureza")) db.exec("ALTER TABLE orders ADD COLUMN natureza TEXT");
+if (!existingCols.includes("previsao_entrega")) db.exec("ALTER TABLE orders ADD COLUMN previsao_entrega TEXT");
 
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
@@ -92,16 +99,29 @@ function rowToOrder(r) {
     wmsStatus: r.wms_status,
   });
 
+  // Segunda regra de leitura: o prazo prometido. O envelhecimento pega o
+  // pedido que parou; esta pega o que anda devagar demais pra data combinada.
+  const previsao = avaliarPrevisao({
+    status: envelhecido.status,
+    previsaoEntrega: r.previsao_entrega,
+    rotuloUltimoEvento: r.carrier_status,
+    wmsStatus: r.wms_status,
+  });
+
+  const statusFinal = pior(envelhecido.status, previsao.status);
+  const motivo = previsao.motivo || envelhecido.motivo;
+
   return {
     orderNumber: r.order_number,
     brand: r.brand,
     customer: r.customer,
-    status: envelhecido.status,
+    status: statusFinal,
     // statusBase: a cor que veio dos eventos, antes do envelhecimento. Guardar
     // as duas deixa o painel explicar POR QUE o quadrado mudou de cor.
     statusBase: r.status,
     diasParados: envelhecido.diasParados,
-    motivoStatus: envelhecido.motivo,
+    motivoStatus: motivo,
+    diasAtePrevisao: previsao.diasAtePrevisao,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
     wmsStatus: r.wms_status,
     carrierStatus: r.carrier_status,
@@ -109,6 +129,11 @@ function rowToOrder(r) {
     // atribuiu -- e o que combineStatus() usa para decidir a cor final.
     wmsSeverity: r.wms_severity,
     carrierSeverity: r.carrier_severity,
+    // Bonificacao/doacao: decidido pela NATUREZA DE OPERACAO da nota, nunca pelo
+    // valor -- ha bonificacao emitida com valor cheio (NF 000222, R$129,99).
+    bonificacao: r.bonificacao === 1,
+    natureza: r.natureza,
+    previsaoEntrega: r.previsao_entrega,
     trackingCode: r.tracking_code,
     city: r.city,
     placedAt: r.placed_at,
@@ -124,12 +149,12 @@ export function getOrder(orderNumber) {
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
-    carrier_status, carrier_severity, tracking_code, city, placed_at,
-    last_event_at, updated_at
+    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega,
+    tracking_code, city, placed_at, last_event_at, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
-    @carrierStatus, @carrierSeverity, @trackingCode, @city, @placedAt,
-    @lastEventAt, @updatedAt
+    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega,
+    @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
     brand = excluded.brand,
@@ -139,6 +164,9 @@ const upsertStmt = db.prepare(`
     wms_severity = excluded.wms_severity,
     carrier_status = excluded.carrier_status,
     carrier_severity = excluded.carrier_severity,
+    bonificacao = excluded.bonificacao,
+    natureza = excluded.natureza,
+    previsao_entrega = excluded.previsao_entrega,
     tracking_code = excluded.tracking_code,
     city = excluded.city,
     placed_at = excluded.placed_at,
@@ -170,6 +198,9 @@ export function upsertOrder(partial) {
     wmsSeverity: partial.wmsSeverity !== undefined ? partial.wmsSeverity : existing.wmsSeverity ?? null,
     carrierStatus: partial.carrierStatus !== undefined ? partial.carrierStatus : existing.carrierStatus ?? null,
     carrierSeverity: partial.carrierSeverity !== undefined ? partial.carrierSeverity : existing.carrierSeverity ?? null,
+    bonificacao: partial.bonificacao !== undefined ? (partial.bonificacao ? 1 : 0) : (existing.bonificacao ? 1 : 0),
+    natureza: partial.natureza ?? existing.natureza ?? null,
+    previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
     trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
     placedAt: partial.placedAt ?? existing.placedAt ?? null,
@@ -238,7 +269,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     const preencher = {};
 
     for (const campo of [
-      "brand", "customer", "city", "placedAt",
+      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega",
       "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
     ]) {
       const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
@@ -248,6 +279,10 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
 
     // O evento mais recente entre os dois manda: o envelhecimento conta a
     // partir dele, e usar o mais antigo faria o pedido parecer parado.
+    // Bonificacao e verdade sobre a venda, nao sobre o quadrado: se QUALQUER
+    // dos registros mesclados era bonificacao, o resultado e bonificacao.
+    if (linha.bonificacao) preencher.bonificacao = true;
+
     const datas = [atual.lastEventAt, linha.lastEventAt].filter(Boolean).sort();
     if (datas.length) preencher.lastEventAt = datas[datas.length - 1];
 
