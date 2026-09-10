@@ -282,7 +282,9 @@ function openPanel(orderNumber) {
   panel.appendChild(campo("Natureza da operação", o.natureza));
   panel.appendChild(campo("Pedido feito em", fmtDate(o.placedAt), true));
   panel.appendChild(campo("Coleta prevista", o.coletaPrevista ? fmtDate(o.coletaPrevista) : null, true));
-  panel.appendChild(campo("Previsão de entrega", o.previsaoEntrega ? fmtDia(o.previsaoEntrega) : null, true));
+  // Rotulo honesto: essa data e o prazo pra EMITIR A NOTA, nunca previsao de
+  // entrega. Chama-la de "previsao de entrega" fazia a tela mentir.
+  panel.appendChild(campo("Prazo para emitir a nota", o.previsaoEntrega ? fmtDia(o.previsaoEntrega) : null, true));
   panel.appendChild(campo("Última atualização", fmtDate(o.lastEventAt), true));
   panel.appendChild(campo("Dias úteis sem novidade", o.diasParados ?? "—", true));
 

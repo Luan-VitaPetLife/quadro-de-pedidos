@@ -254,83 +254,45 @@ function jaSaiu({ rotuloUltimoEvento, wmsStatus }) {
 /**
  * @returns {{status, motivo: string|null, diasAtePrevisao: number|null}}
  */
-export function avaliarPrevisao({
-  status,
-  previsaoEntrega,
-  rotuloUltimoEvento,
-  wmsStatus,
-  temNota,
-  agora = new Date(),
-}) {
+export function avaliarPrevisao({ status, previsaoEntrega, temNota, rotuloUltimoEvento, agora = new Date() }) {
   const inalterado = { status, motivo: null, diasAtePrevisao: null };
   if (!previsaoEntrega) return inalterado;
 
   // Pedido entregue nao tem prazo a cumprir -- ja cumpriu.
   if (ehEventoFinal(rotuloUltimoEvento)) return inalterado;
 
-  // PEDIDO SEM NOTA: a data prevista significa OUTRA COISA.
+  // NOTA JA EMITIDA: a data cumpriu o papel dela.
   //
-  // Nos pedidos de Shopee e Mercado Livre, a "data prevista" que o Bling mostra
-  // e o prazo maximo pra EMITIR A NOTA e despachar -- nao a previsao de
-  // entrega. Ficar "Aguardando Envio" antes dessa data e o funcionamento
-  // normal, e a maioria dos pedidos passa por ai. So vira problema se a data
-  // passar e o pedido continuar sem nota.
-  if (!temNota) {
-    const limite = dataLocal(previsaoEntrega);
-    const agoraDia = dataLocal(agora);
-    if (!limite || !agoraDia || !/^\d{4}-\d{2}-\d{2}$/.test(limite) || limite < "2000-01-01") return inalterado;
-    if (limite < agoraDia) {
-      return {
-        status: "red",
-        motivo: `Prazo para emitir a nota era ${limite.split("-").reverse().join("/")} e o pedido segue sem nota`,
-        diasAtePrevisao: -diasUteisDesde(limite, agora),
-      };
-    }
-    return { ...inalterado, diasAtePrevisao: diasUteisDesde(agoraDia, limite) };
-  }
-
-  // SEM NOTICIA DE NINGUEM, NAO DA PRA ACUSAR ATRASO.
+  // A "data prevista" do Bling e o PRAZO PARA EMITIR A NOTA, nunca previsao de
+  // entrega. O caso que corrigiu esta regra: o pedido 1459 (Mercado Livre)
+  // teve a nota gerada em 10/09, um dia ANTES do prazo de 11/09, e o quadro
+  // mesmo assim acusava "entrega prevista para 11/09 e o pedido ainda nao
+  // saiu" -- cobrando uma entrega por uma data que nunca falou de entrega.
   //
-  // Se nem o armazem nem a transportadora falaram do pedido, o quadro nao sabe
-  // se ele foi entregue -- so sabe que nao ficou sabendo. Marcar de vermelho
-  // ai e acusar sem prova, e foi o que aconteceu: 96 pedidos de agosto viraram
-  // "problema" de uma vez, quase todos com rastreio de transportadora que nem
-  // consultamos (BR..., MEL...). Ausencia de informacao nao e evidencia de
-  // atraso; e ausencia de informacao.
-  if (!rotuloUltimoEvento && !wmsStatus) return inalterado;
+  // Depois do despacho, quem cobra o andamento sao o envelhecimento (silencio)
+  // e a coleta agendada. Aqui nao ha mais nada a verificar.
+  if (temNota) return inalterado;
 
-  const previsao = dataLocal(previsaoEntrega);
+  const limite = dataLocal(previsaoEntrega);
   const hoje = dataLocal(agora);
-  if (!previsao || !hoje) return inalterado;
+  if (!limite || !hoje) return inalterado;
 
-  // O Bling devolve "0000-00-00" quando o pedido nao tem previsao. Sem esta
-  // guarda isso passa por data valida, fica menor que hoje e vira "prazo
-  // vencido" -- alarme puro em cima de campo vazio.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(previsao) || previsao < "2000-01-01") return inalterado;
+  // O Bling devolve "0000-00-00" quando o campo esta vazio. Sem esta guarda
+  // isso passa por data valida, fica menor que hoje e vira "prazo vencido" --
+  // alarme puro em cima de campo em branco.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(limite) || limite < "2000-01-01") return inalterado;
 
-  // Dias uteis daqui ate a previsao. Negativo quando a data ja passou.
-  const atrasado = previsao < hoje;
-  const diasAtePrevisao = atrasado ? -diasUteisDesde(previsao, agora) : diasUteisDesde(hoje, previsao);
-
-  if (atrasado) {
+  if (limite < hoje) {
     return {
       status: "red",
-      motivo: `Previsao de entrega era ${previsao.split("-").reverse().join("/")} e o pedido nao foi entregue`,
-      diasAtePrevisao,
+      motivo: `Prazo para emitir a nota era ${limite.split("-").reverse().join("/")} e o pedido segue sem nota`,
+      diasAtePrevisao: -diasUteisDesde(limite, agora),
     };
   }
 
-  // Prazo chegando e o pedido nem saiu do armazem: nao vai dar tempo.
-  const margem = Number(process.env.DIAS_UTEIS_MARGEM_PREVISAO || 2);
-  if (diasAtePrevisao <= margem && !jaSaiu({ rotuloUltimoEvento, wmsStatus })) {
-    return {
-      status: status === "red" ? "red" : "amber",
-      motivo: `Entrega prevista para ${previsao.split("-").reverse().join("/")} e o pedido ainda nao saiu`,
-      diasAtePrevisao,
-    };
-  }
-
-  return { ...inalterado, diasAtePrevisao };
+  // Antes do prazo, sem nota, e o funcionamento normal -- e por onde passa a
+  // maioria dos pedidos de Shopee e Mercado Livre enquanto aguardam envio.
+  return { ...inalterado, diasAtePrevisao: diasUteisDesde(hoje, limite) };
 }
 
 /** Fica com a pior das duas cores. */
