@@ -175,3 +175,21 @@ export async function handleSincronizar(req, res) {
     sincronizacaoEmCurso = false;
   }
 }
+
+// POST /bling/limpar?s=<segredo>
+//
+// Remove os pedidos que nao tem status de nenhuma das duas fontes. A limpeza
+// tambem acontece no fim de cada sincronizacao, mas ali ela depende do ciclo
+// inteiro terminar -- que leva minutos e pode ser interrompido por um deploy.
+// Esta rota faz so a limpeza, na hora, e responde quantos saiu.
+export async function handleLimpar(req, res) {
+  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
+  try {
+    const { limparPedidosSemStatus } = await import("../sync-bling.js");
+    const removidos = limparPedidosSemStatus();
+    console.log(`[bling] limpeza manual: ${removidos} pedido(s) sem status removido(s).`);
+    res.json({ ok: true, removidos });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+}
