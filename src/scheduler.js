@@ -52,11 +52,19 @@ export function startScheduler() {
   }
 
   async function ciclo() {
-    // Ordem importa: a Mandae/WMS atualizam status; o Bling depois mescla os
-    // duplicados e preenche cadastro. Mesclar antes deixaria de fora o que
-    // acabou de chegar.
-    await runSync().catch((err) => console.error("[scheduler] erro na sincronizacao:", err));
+    // O Bling vem PRIMEIRO, e a ordem tem motivo.
+    //
+    // Ele e o unico que DESCOBRE pedido: mescla os duplicados, preenche o
+    // cadastro e traz pro radar os despachados que nem o WMS nem o webhook
+    // conheciam -- e, com eles, o codigo de rastreio. So depois disso a
+    // reconsulta da Mandae tem o que perguntar: ela consulta pelo rastreio, e
+    // rastreio que ela nao conhece nao existe pra ela.
+    //
+    // Na ordem inversa (como estava), um pedido descoberto pelo Bling ficava um
+    // ciclo inteiro -- duas horas -- sem status da transportadora, aparecendo
+    // como se nada se soubesse dele.
     await rodarBling();
+    await runSync().catch((err) => console.error("[scheduler] erro na sincronizacao:", err));
   }
 
   // Roda uma vez ao subir, sem travar o boot do servidor.
