@@ -130,8 +130,6 @@ function rowToOrder(r) {
         rotuloUltimoEvento: r.carrier_status,
         wmsStatus: r.wms_status,
         temNota: r.tem_nota === 1,
-    notaFiscal: r.nota_fiscal,
-    coletaPrevista: r.coleta_prevista,
       });
 
   // A COLETA AGENDADA manda em tudo.
@@ -176,6 +174,11 @@ function rowToOrder(r) {
     // Nota emitida separa "ainda nao faturado" de "a caminho" -- a regra de
     // prazo muda de sentido conforme isso.
     temNota: r.tem_nota === 1,
+    // Numero da nota que o WMS mostra ("000000246 - 001") -- e por ele que a
+    // operacao acha a nota no Bling.
+    notaFiscal: r.nota_fiscal,
+    // Coleta agendada na Mandae. Vem disfarcada de evento com data futura.
+    coletaPrevista: r.coleta_prevista,
     trackingCode: r.tracking_code,
     city: r.city,
     placedAt: r.placed_at,
