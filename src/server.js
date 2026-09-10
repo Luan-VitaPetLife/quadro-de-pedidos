@@ -7,6 +7,7 @@ import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
+import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
 import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar } from "./webhooks/bling.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +73,24 @@ app.get("/bling/diagnostico", handleDiagnostico);
 app.post("/bling/sincronizar", handleSincronizar);
 app.post("/bling/limpar", handleLimpar);
 
+// Diagnostico do PROCESSO: como a instancia anterior terminou, quantas vezes
+// ja subiu neste volume, ha quanto tempo esta de pe. E o que responde "por que
+// o Railway diz que caiu?" sem depender do log do container que morreu.
+app.get("/api/diagnostico", (req, res) => {
+  const esperado = process.env.MANDAE_WEBHOOK_SECRET;
+  if (esperado && req.query?.s !== esperado) return res.status(401).json({ error: "segredo invalido" });
+  const d = lerDiario();
+  res.json({
+    agora: new Date().toISOString(),
+    subiuEm: d?.subiuEm ?? null,
+    dePeHaSegundos: Math.round(process.uptime()),
+    bootsNesteVolume: d?.boots ?? null,
+    instanciaAnterior: d?.anterior ?? null,
+    memoriaMB: Math.round(process.memoryUsage().rss / 1048576),
+    node: process.version,
+  });
+});
+
 /**
  * Confere na subida o que so daria erro (ou pior: silencio) muito depois.
  * Roda uma vez, escreve no log do Railway e nao derruba o processo.
@@ -119,6 +138,16 @@ const servidor = app.listen(port, host, () => {
           "No Railway, confira em Settings -> Networking se a porta alvo do dominio e 3000."
   );
   checarConfiguracao();
+
+  const { boots, anterior } = registrarBoot();
+  console.log(`[diario] boot numero ${boots} neste volume.`);
+  if (anterior) {
+    const detalhe = anterior.detalhe ? `: ${anterior.detalhe}` : "";
+    console.log(
+      `[diario] a instancia anterior terminou como "${anterior.motivo}"${detalhe} (${anterior.em || "sem data"}).`
+    );
+  }
+
   tarefaAgendada = startScheduler();
 });
 
@@ -141,12 +170,14 @@ function encerrar(sinal) {
   if (encerrando) return; // dois sinais seguidos nao viram dois desligamentos
   encerrando = true;
   console.log(`[server] recebi ${sinal}, encerrando com calma...`);
+  anotarSaida(`sinal:${sinal}`);
 
   // Prazo maximo. Se algo travar (conexao pendurada, escrita longa), e melhor
   // sair a forca do que o orquestrador nos matar -- morte por timeout volta a
   // contar como crash, que e justamente o que estamos evitando.
   const prazo = setTimeout(() => {
     console.warn("[server] demorou demais pra fechar; saindo assim mesmo.");
+    anotarSaida("timeout-no-encerramento");
     process.exit(0);
   }, 10000);
   prazo.unref();
@@ -176,8 +207,10 @@ process.on("SIGINT", () => encerrar("SIGINT")); // Ctrl+C no terminal
 // escrito o que aconteceu antes de sair.
 process.on("unhandledRejection", (motivo) => {
   console.error("[server] promessa rejeitada sem tratamento:", motivo);
+  anotarSaida("unhandledRejection", motivo?.stack || motivo);
 });
 process.on("uncaughtException", (err) => {
   console.error("[server] excecao nao tratada:", err);
+  anotarSaida("uncaughtException", err?.stack || err?.message);
   process.exit(1); // aqui a saida e 1 de proposito: isso E uma falha de verdade
 });
