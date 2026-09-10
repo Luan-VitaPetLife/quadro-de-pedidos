@@ -29,7 +29,7 @@ import {
   ehNaturezaDeBonificacao,
   objetoDePostagem,
 } from "./integrations/bling.js";
-import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido } from "./lib/db.js";
+import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
 
 /**
  * Mapa das notas do periodo, indexado pelo ID (que e como o pedido as
@@ -81,6 +81,10 @@ export async function runSyncBling({ dias = 30 } = {}) {
 
   const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
   console.log(`[bling] ${lista.length} pedido(s) na listagem.`);
+
+  // Pares (quadrado canonico -> chave da nota) para mesclar no fim, quando o
+  // indice ja refletir tudo que foi gravado nesta rodada.
+  const paraMesclarPorNota = [];
 
   const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0 };
 
@@ -143,6 +147,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
         // limite pra emitir a NF, nao a previsao de entrega.
         temNota: !!nota,
       });
+      if (nota?.numero) paraMesclarPorNota.push([canonico, chaveNota(nota.numero)]);
       r.gravados++;
     } catch (err) {
       r.erros++;
@@ -182,6 +187,27 @@ export async function runSyncBling({ dias = 30 } = {}) {
       placedAt: nota.emissao || undefined,
       temNota: true,
     });
+    paraMesclarPorNota.push([nota.numero, chaveNota(nota.numero)]);
+  }
+
+  // ---------------------------------------------------------------------
+  // Mesclagem pelo NUMERO DA NOTA
+  // ---------------------------------------------------------------------
+  //
+  // O WMS batiza a remessa com um numero proprio -- "ATB0240367" -- que nao
+  // existe no Bling nem como pedido nem como nota (verificado). O unico elo
+  // entre ele e a nota "000258" e a coluna Nota Fiscal do portal, que mostra
+  // "258 - 001".
+  //
+  // Sem isto, metade do quadro era duplicata: 88 quadrados ATB de um lado e 89
+  // quadrados 0000xx do outro, cada um com metade da historia -- o ATB com o
+  // status do armazem e sem rastreio, o da nota com o rastreio e sem status.
+  //
+  // chaveNota() normaliza os dois formatos para o mesmo numero.
+  const porNota = indicePorNota();
+  for (const [canonico, chave] of paraMesclarPorNota) {
+    const candidatos = (porNota.get(chave) || []).filter((n) => n !== canonico);
+    if (candidatos.length) r.mesclados += mesclarEmCanonico(canonico, candidatos).mesclados;
   }
 
   r.removidos = limparPedidosSemStatus();

@@ -55,6 +55,7 @@ db.exec(`
     tem_nota INTEGER,
     nota_fiscal TEXT,
     coleta_prevista TEXT,
+    apelidos TEXT,
     tracking_code TEXT,
     city TEXT,
     placed_at TEXT,
@@ -87,6 +88,9 @@ if (!existingCols.includes("tem_nota")) db.exec("ALTER TABLE orders ADD COLUMN t
 if (!existingCols.includes("nota_fiscal")) db.exec("ALTER TABLE orders ADD COLUMN nota_fiscal TEXT");
 // Coleta agendada na Mandae. Vem disfarcada de evento com data futura.
 if (!existingCols.includes("coleta_prevista")) db.exec("ALTER TABLE orders ADD COLUMN coleta_prevista TEXT");
+// Numeros que este pedido ja teve em outros sistemas e foram mesclados aqui.
+// Sem guardar, quem procurasse pelo numero do WMS nao acharia mais o pedido.
+if (!existingCols.includes("apelidos")) db.exec("ALTER TABLE orders ADD COLUMN apelidos TEXT");
 
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
@@ -189,6 +193,7 @@ function rowToOrder(r) {
     notaFiscal: r.nota_fiscal,
     // Coleta agendada na Mandae. Vem disfarcada de evento com data futura.
     coletaPrevista: r.coleta_prevista,
+    apelidos: r.apelidos ? r.apelidos.split(",").filter(Boolean) : [],
     trackingCode: r.tracking_code,
     city: r.city,
     placedAt: r.placed_at,
@@ -204,11 +209,11 @@ export function getOrder(orderNumber) {
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
-    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal, coleta_prevista,
+    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal, coleta_prevista, apelidos,
     tracking_code, city, placed_at, last_event_at, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
-    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal, @coletaPrevista,
+    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal, @coletaPrevista, @apelidos,
     @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
@@ -225,6 +230,7 @@ const upsertStmt = db.prepare(`
     tem_nota = excluded.tem_nota,
     nota_fiscal = excluded.nota_fiscal,
     coleta_prevista = excluded.coleta_prevista,
+    apelidos = excluded.apelidos,
     tracking_code = excluded.tracking_code,
     city = excluded.city,
     placed_at = excluded.placed_at,
@@ -261,6 +267,7 @@ export function upsertOrder(partial) {
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
     notaFiscal: partial.notaFiscal ?? existing.notaFiscal ?? null,
     coletaPrevista: partial.coletaPrevista !== undefined ? partial.coletaPrevista : existing.coletaPrevista ?? null,
+    apelidos: (partial.apelidos ?? existing.apelidos ?? []).join ? [...new Set([...(existing.apelidos || []), ...(partial.apelidos || [])])].join(",") : null,
     temNota: partial.temNota !== undefined ? (partial.temNota ? 1 : 0) : (existing.temNota ? 1 : 0),
     trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
@@ -348,6 +355,12 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     const datas = [atual.lastEventAt, linha.lastEventAt].filter(Boolean).sort();
     if (datas.length) preencher.lastEventAt = datas[datas.length - 1];
 
+    // O numero absorvido continua valendo em ALGUM sistema: "ATB0240367" e
+    // como o WMS chama essa remessa, e quem vier do portal vai procurar por
+    // ele. Guardar o apelido mantem o pedido encontravel pelo numero que a
+    // pessoa tem na mao, mesmo que o quadrado agora se chame outra coisa.
+    preencher.apelidos = [...(linha.apelidos || []), apelido];
+
     upsertOrder({ orderNumber: canonico, ...preencher });
     apagarPedido(apelido);
 
@@ -356,4 +369,35 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
   }
 
   return resultado;
+}
+
+/**
+ * Chave de comparacao de nota fiscal.
+ *
+ * Cada sistema escreve a mesma nota de um jeito: o WMS mostra "258 - 001"
+ * (numero e serie em colunas separadas, que juntamos na leitura) e o Bling
+ * mostra "000258" (com zeros a esquerda). Comparar o texto cru nunca casa, e
+ * foi por isso que a mesma remessa ocupava dois quadrados -- "ATB0240367",
+ * vindo do WMS, e "000258", vindo da nota.
+ *
+ * A chave e so o NUMERO, sem zeros a esquerda e sem a serie.
+ */
+export function chaveNota(texto) {
+  if (!texto) return null;
+  const numero = String(texto).split("-")[0].replace(/\D/g, "");
+  if (!numero) return null;
+  const semZeros = numero.replace(/^0+/, "");
+  return semZeros || null;
+}
+
+/** Indice chave-da-nota -> numeros de pedido que a usam. */
+export function indicePorNota() {
+  const mapa = new Map();
+  for (const o of listOrders()) {
+    const k = chaveNota(o.notaFiscal);
+    if (!k) continue;
+    if (!mapa.has(k)) mapa.set(k, []);
+    mapa.get(k).push(o.orderNumber);
+  }
+  return mapa;
 }
