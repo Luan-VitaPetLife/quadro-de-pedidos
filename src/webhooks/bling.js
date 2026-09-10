@@ -200,28 +200,6 @@ export async function handleLimpar(req, res) {
   }
 }
 
-// POST /bling/sincronizar-notas?s=<segredo>
-//
-// So as notas fiscais. Existe separada porque, no ciclo completo, as notas sao
-// a ultima etapa depois de centenas de chamadas de pedido -- e um deploy no
-// meio interrompe tudo antes de chegar nelas. Assim da pra rodar e conferir a
-// parte de bonificacao sem esperar o resto.
-let notasEmCurso = false;
-
-export async function handleSincronizarNotas(req, res) {
-  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
-  if (notasEmCurso) return res.status(409).json({ error: "ja existe uma sincronizacao de notas em andamento" });
-
-  const dias = Number(req.query?.dias) || 30;
-  notasEmCurso = true;
-  res.json({ ok: true, iniciada: true, dias });
-
-  try {
-    const { runSyncNotas } = await import("../sync-notas.js");
-    await runSyncNotas({ dias });
-  } catch (err) {
-    console.error("[notas] sincronizacao falhou:", err.message);
-  } finally {
-    notasEmCurso = false;
-  }
-}
+// (A sincronizacao de notas foi absorvida por /bling/sincronizar: notas e
+// pedidos agora sao lidos na mesma passada, porque o vinculo entre eles e por
+// ID e so da pra resolver com os dois em maos.)

@@ -23,8 +23,12 @@ function fmtDate(iso) {
 }
 
 function fmtDia(iso) {
+  // O Bling manda "0000-00-00" quando o campo esta vazio. Sem esta guarda o
+  // painel exibia "00/00/0000", que parece dado e nao e.
   if (!iso) return "—";
-  return String(iso).slice(0, 10).split("-").reverse().join("/");
+  const d = String(iso).slice(0, 10);
+  if (!/^d{4}-d{2}-d{2}$/.test(d) || d < "2000-01-01") return "—";
+  return d.split("-").reverse().join("/");
 }
 
 // ---------------------------------------------------------------------------
