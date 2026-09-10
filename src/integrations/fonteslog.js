@@ -232,3 +232,28 @@ export async function buscarPedidosRejeitados({ dataDe, dataAte } = {}) {
       processamento: l.dataHoraProcessamento || "",
     }));
 }
+
+// ---------------------------------------------------------------------------
+// Por que NAO existe religamento automatico aqui
+// ---------------------------------------------------------------------------
+//
+// Tentativa feita e descartada, registrada pra ninguem repetir:
+//
+// O portal grava um cookie `recaptcha_verificado` com validade de ~5 dias, e
+// enquanto ele existe o /Login/ExibirCaptcha responde {"MostrarRecaptcha":false}.
+// Parecia significar que daria pra refazer o login por HTTP e manter a leitura
+// rodando sozinha por dias.
+//
+// Nao da. Esse cookie so faz o portal NAO DESENHAR o widget; o servidor segue
+// exigindo um token de captcha valido pra autenticar. Um POST em
+// /Login/AcessarCliente com CNPJ e senha corretos responde 302 para
+// "/?cnpjLogin=<cnpj>" -- que PARECE sucesso, mas e a volta pra tela de login
+// com o campo preenchido. A prova esta em pedir uma tela protegida depois: ela
+// responde 302 para "/", ou seja, ninguem entrou.
+//
+// (Cuidado ao testar: o corpo de um 302 e so "Object moved". Procurar o
+// formulario de login nele da falso negativo -- foi assim que a primeira
+// leitura errou e concluiu que tinha funcionado.)
+//
+// Entao sessao expirada exige mesmo login manual: `npm run fonteslog-login`.
+// E o certo -- o captcha existe pra impedir exatamente o que se tentou aqui.
