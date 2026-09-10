@@ -203,7 +203,10 @@ export async function buscarPedidosParados({ dataDe, dataAte } = {}) {
     .map((l) => ({
       numeroPedido: l.numeroPedido,
       motivo: l.motivo || "",
-      notaFiscal: l.notaFiscal || "",
+      // A tela separa numero e serie em duas colunas; a de Rastreamento ja
+      // devolve junto ("000000246 - 001"). Juntar aqui deixa o quadro com um
+      // formato so, senao a mesma nota aparece como "263" e como "000000263 - 001".
+      notaFiscal: [l.notaFiscal, l.serieNf].filter(Boolean).join(" - ") || "",
       recepcao: l.dataHoraDaRecepcao || "",
     }));
 }
@@ -228,7 +231,10 @@ export async function buscarPedidosRejeitados({ dataDe, dataAte } = {}) {
     .map((l) => ({
       numeroPedido: l.numeroPedido,
       observacoes: l.observacoes || "",
-      notaFiscal: l.notaFiscal || "",
+      // A tela separa numero e serie em duas colunas; a de Rastreamento ja
+      // devolve junto ("000000246 - 001"). Juntar aqui deixa o quadro com um
+      // formato so, senao a mesma nota aparece como "263" e como "000000263 - 001".
+      notaFiscal: [l.notaFiscal, l.serieNf].filter(Boolean).join(" - ") || "",
       processamento: l.dataHoraProcessamento || "",
     }));
 }
