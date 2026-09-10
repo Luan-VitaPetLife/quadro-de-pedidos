@@ -95,3 +95,32 @@ export function latestEvent(tracking) {
   });
   return sorted[0];
 }
+
+/**
+ * Data da COLETA PREVISTA, quando a encomenda ainda nao foi coletada.
+ *
+ * A Mandae nao tem campo proprio pra isso: ela devolve um evento de mentira,
+ * com `name` nulo, `description` "Nenhuma atualizacao disponivel ainda." e a
+ * data da COLETA AGENDADA -- que esta no FUTURO. Na pagina publica de rastreio
+ * isso aparece como "Coleta Prevista: Qui, 10 Set".
+ *
+ * Ler esse evento como se fosse noticia velha era o que fazia o quadro pintar
+ * de amarelo pedido que esta apenas aguardando o caminhao passar no horario
+ * combinado. Nao ha pendencia nenhuma nisso.
+ *
+ * @returns {string|null} data ISO da coleta prevista
+ */
+export function coletaPrevista(tracking) {
+  const eventos = tracking?.events;
+  if (!Array.isArray(eventos) || eventos.length === 0) return null;
+
+  // So vale enquanto NAO houver evento de verdade. Assim que a coleta acontece,
+  // a Mandae troca esse placeholder por eventos reais.
+  const temEventoReal = eventos.some((e) => e?.name);
+  if (temEventoReal) return null;
+
+  const placeholder = eventos.find((e) =>
+    /nenhuma atualiza/i.test(String(e?.description || ""))
+  );
+  return placeholder?.timestamp || placeholder?.date || null;
+}

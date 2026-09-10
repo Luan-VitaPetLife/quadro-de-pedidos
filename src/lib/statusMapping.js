@@ -369,3 +369,60 @@ export function semAcompanhamento({ trackingCode, wmsStatus, carrierStatus }) {
   // nao vai ter, base nenhuma pra dizer se esta bem ou mal.
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Coleta prevista
+// ---------------------------------------------------------------------------
+//
+// A encomenda esta pronta e AGENDADA -- o caminhao passa no horario combinado.
+// Isso nao e pendencia: e o fluxo normal entre a expedicao e o primeiro evento
+// de rastreio, e nesse intervalo o WMS costuma marcar "PARADO" (parado
+// esperando coleta) e a Mandae responde "Nenhuma atualizacao disponivel".
+//
+// Sem esta regra, os dois sinais somados pintavam de amarelo um pedido que nao
+// tem problema nenhum -- e amarelo, aqui, quer dizer "alguem precisa agir".
+//
+// So vira alarme quando a coleta atrasa de verdade. O horario combinado pode
+// escorregar algumas horas sem que isso signifique nada, entao a tolerancia e
+// contada em DIAS UTEIS, nao em horas.
+
+export function avaliarColeta({ coletaPrevista, rotuloUltimoEvento, agora = new Date() }) {
+  const inalterado = { pendente: false, status: null, motivo: null };
+  if (!coletaPrevista) return inalterado;
+
+  // Evento real ja chegou: a coleta aconteceu, o agendamento nao importa mais.
+  if (rotuloUltimoEvento && !/nenhuma atualiza/i.test(rotuloUltimoEvento)) return inalterado;
+
+  const dia = dataLocal(coletaPrevista);
+  const hoje = dataLocal(agora);
+  if (!dia || !hoje) return inalterado;
+
+  const quando = String(coletaPrevista).slice(11, 16);
+  const rotulo = dia.split("-").reverse().join("/") + (quando ? ` ${quando}` : "");
+
+  if (dia >= hoje) {
+    return {
+      pendente: true,
+      status: "green",
+      motivo: `Aguardando coleta, prevista para ${rotulo}`,
+    };
+  }
+
+  // Coleta atrasada. Um dia util de tolerancia: a coleta pode escorregar do
+  // horario sem que ninguem precise fazer nada.
+  const atraso = diasUteisDesde(dia, agora);
+  const tolerancia = Number(process.env.DIAS_UTEIS_TOLERANCIA_COLETA || 1);
+  if (atraso <= tolerancia) {
+    return {
+      pendente: true,
+      status: "green",
+      motivo: `Coleta prevista para ${rotulo}; ainda dentro da tolerancia`,
+    };
+  }
+
+  return {
+    pendente: true,
+    status: atraso > tolerancia * 3 ? "red" : "amber",
+    motivo: `Coleta estava prevista para ${rotulo} e nao aconteceu (${atraso} dias uteis)`,
+  };
+}

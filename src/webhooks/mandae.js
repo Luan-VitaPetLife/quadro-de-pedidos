@@ -10,6 +10,7 @@
 
 import { upsertOrder } from "../lib/db.js";
 import { mapMandaeEvent } from "../lib/statusMapping.js";
+import { coletaPrevista } from "../integrations/mandae.js";
 
 /**
  * Pega o primeiro candidato que seja um identificador de verdade.
@@ -141,6 +142,8 @@ export async function handleRastreamento(req, res) {
   })[0];
 
   const mapped = latest ? mapMandaeEvent(latest) : { status: "amber", label: null };
+  // Coleta agendada vem disfarcada de evento: data futura e "name" nulo.
+  const agendada = coletaPrevista(body);
 
   // So mandamos carrierStatus/carrierSeverity -- db.js recalcula o status
   // final do pedido combinando com o que ja soubermos do WMS (FontesLog).
@@ -149,6 +152,7 @@ export async function handleRastreamento(req, res) {
     trackingCode: body.trackingCode,
     carrierStatus: mapped.label,
     carrierSeverity: mapped.status,
+    coletaPrevista: agendada,
     lastEventAt: latest?.timestamp || latest?.date || new Date().toISOString(),
   });
 

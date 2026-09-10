@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +54,7 @@ db.exec(`
     previsao_entrega TEXT,
     tem_nota INTEGER,
     nota_fiscal TEXT,
+    coleta_prevista TEXT,
     tracking_code TEXT,
     city TEXT,
     placed_at TEXT,
@@ -84,6 +85,8 @@ if (!existingCols.includes("tem_nota")) db.exec("ALTER TABLE orders ADD COLUMN t
 // que a operacao acha a nota no Bling. Sem ele, achar a nota do pedido vira
 // busca manual.
 if (!existingCols.includes("nota_fiscal")) db.exec("ALTER TABLE orders ADD COLUMN nota_fiscal TEXT");
+// Coleta agendada na Mandae. Vem disfarcada de evento com data futura.
+if (!existingCols.includes("coleta_prevista")) db.exec("ALTER TABLE orders ADD COLUMN coleta_prevista TEXT");
 
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
@@ -128,10 +131,23 @@ function rowToOrder(r) {
         wmsStatus: r.wms_status,
         temNota: r.tem_nota === 1,
     notaFiscal: r.nota_fiscal,
+    coletaPrevista: r.coleta_prevista,
       });
 
-  const statusFinal = pior(envelhecido.status, previsao.status);
-  const motivo = previsao.motivo || envelhecido.motivo;
+  // A COLETA AGENDADA manda em tudo.
+  //
+  // Entre a expedicao e o primeiro evento de rastreio existe um intervalo
+  // normal: o WMS marca "PARADO" (parado esperando o caminhao) e a Mandae
+  // responde "Nenhuma atualizacao disponivel". Somados, os dois pintavam de
+  // amarelo um pedido que so esta aguardando o horario combinado -- e amarelo,
+  // aqui, quer dizer "alguem precisa agir".
+  const coleta = avaliarColeta({
+    coletaPrevista: r.coleta_prevista,
+    rotuloUltimoEvento: r.carrier_status,
+  });
+
+  const statusFinal = coleta.pendente ? coleta.status : pior(envelhecido.status, previsao.status);
+  const motivo = coleta.pendente ? coleta.motivo : previsao.motivo || envelhecido.motivo;
 
   return {
     orderNumber: r.order_number,
@@ -175,11 +191,11 @@ export function getOrder(orderNumber) {
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
-    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal,
+    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal, coleta_prevista,
     tracking_code, city, placed_at, last_event_at, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
-    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal,
+    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal, @coletaPrevista,
     @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
@@ -195,6 +211,7 @@ const upsertStmt = db.prepare(`
     previsao_entrega = excluded.previsao_entrega,
     tem_nota = excluded.tem_nota,
     nota_fiscal = excluded.nota_fiscal,
+    coleta_prevista = excluded.coleta_prevista,
     tracking_code = excluded.tracking_code,
     city = excluded.city,
     placed_at = excluded.placed_at,
@@ -230,6 +247,7 @@ export function upsertOrder(partial) {
     natureza: partial.natureza ?? existing.natureza ?? null,
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
     notaFiscal: partial.notaFiscal ?? existing.notaFiscal ?? null,
+    coletaPrevista: partial.coletaPrevista !== undefined ? partial.coletaPrevista : existing.coletaPrevista ?? null,
     temNota: partial.temNota !== undefined ? (partial.temNota ? 1 : 0) : (existing.temNota ? 1 : 0),
     trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
@@ -299,7 +317,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     const preencher = {};
 
     for (const campo of [
-      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaFiscal",
+      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaFiscal", "coletaPrevista",
       "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
     ]) {
       const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
