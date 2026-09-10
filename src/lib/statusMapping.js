@@ -267,9 +267,24 @@ export function avaliarPrevisao({
   // Pedido entregue nao tem prazo a cumprir -- ja cumpriu.
   if (ehEventoFinal(rotuloUltimoEvento)) return inalterado;
 
+  // SEM NOTICIA DE NINGUEM, NAO DA PRA ACUSAR ATRASO.
+  //
+  // Se nem o armazem nem a transportadora falaram do pedido, o quadro nao sabe
+  // se ele foi entregue -- so sabe que nao ficou sabendo. Marcar de vermelho
+  // ai e acusar sem prova, e foi o que aconteceu: 96 pedidos de agosto viraram
+  // "problema" de uma vez, quase todos com rastreio de transportadora que nem
+  // consultamos (BR..., MEL...). Ausencia de informacao nao e evidencia de
+  // atraso; e ausencia de informacao.
+  if (!rotuloUltimoEvento && !wmsStatus) return inalterado;
+
   const previsao = dataLocal(previsaoEntrega);
   const hoje = dataLocal(agora);
   if (!previsao || !hoje) return inalterado;
+
+  // O Bling devolve "0000-00-00" quando o pedido nao tem previsao. Sem esta
+  // guarda isso passa por data valida, fica menor que hoje e vira "prazo
+  // vencido" -- alarme puro em cima de campo vazio.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(previsao) || previsao < "2000-01-01") return inalterado;
 
   // Dias uteis daqui ate a previsao. Negativo quando a data ja passou.
   const atrasado = previsao < hoje;
