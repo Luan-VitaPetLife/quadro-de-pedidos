@@ -45,6 +45,7 @@ export async function handleFontesLog(req, res) {
     upsertOrder({
       orderNumber,
       wmsStatus: p.status || null,
+      notaFiscal: p.notaFiscal || undefined,
       wmsSeverity: p.severidade || mapFontesLogStatus(p.status),
       lastEventAt: p.ultimoMovimento || undefined,
     });

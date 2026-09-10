@@ -69,6 +69,9 @@ async function main() {
       numeroPedido: p.numeroPedido,
       status: p.status,
       severidade: null, // deixa mapFontesLogStatus decidir pelo status seco
+      // O WMS mostra "000000246 - 001" (numero - serie). E por esse numero que
+      // a operacao acha a nota no Bling, entao ele vai junto pro quadro.
+      notaFiscal: p.notaFiscal || null,
       ultimoMovimento: ultimoMovimento(p),
     });
   }
@@ -88,6 +91,7 @@ async function main() {
     porPedido.set(p.numeroPedido, {
       ...anterior,
       status: p.motivo ? `PARADO — ${p.motivo}` : "PARADO",
+      notaFiscal: p.notaFiscal || anterior.notaFiscal || null,
       severidade: "amber", // aviso em aberto: alguem precisa resolver
       ultimoMovimento: anterior.ultimoMovimento || null,
     });
@@ -98,6 +102,7 @@ async function main() {
     porPedido.set(p.numeroPedido, {
       ...anterior,
       status: p.observacoes ? `REJEITADO — ${p.observacoes}` : "REJEITADO",
+      notaFiscal: p.notaFiscal || anterior.notaFiscal || null,
       severidade: "red", // o WMS recusou: esse pedido nao vai ser separado
       ultimoMovimento: anterior.ultimoMovimento || null,
     });

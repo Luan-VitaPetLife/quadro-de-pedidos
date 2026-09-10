@@ -344,3 +344,11 @@ export function ehNaturezaDeBonificacao(nome) {
     .trim();
   return /\bsaida\b/.test(n) && /bonificac/.test(n);
 }
+
+/**
+ * GET cru em qualquer caminho da API do Bling. Usado so pela rota de sonda,
+ * pra descobrir formato de resposta contra a API real em vez de adivinhar.
+ */
+export async function sondarCaminho(caminho, params = {}) {
+  return blingFetch(caminho, params);
+}

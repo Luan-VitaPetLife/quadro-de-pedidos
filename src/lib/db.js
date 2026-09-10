@@ -53,6 +53,7 @@ db.exec(`
     natureza TEXT,
     previsao_entrega TEXT,
     tem_nota INTEGER,
+    nota_fiscal TEXT,
     tracking_code TEXT,
     city TEXT,
     placed_at TEXT,
@@ -79,6 +80,10 @@ if (!existingCols.includes("bonificacao")) db.exec("ALTER TABLE orders ADD COLUM
 if (!existingCols.includes("natureza")) db.exec("ALTER TABLE orders ADD COLUMN natureza TEXT");
 if (!existingCols.includes("previsao_entrega")) db.exec("ALTER TABLE orders ADD COLUMN previsao_entrega TEXT");
 if (!existingCols.includes("tem_nota")) db.exec("ALTER TABLE orders ADD COLUMN tem_nota INTEGER");
+// Numero da nota fiscal -- o WMS mostra "000000246 - 001" e e por esse numero
+// que a operacao acha a nota no Bling. Sem ele, achar a nota do pedido vira
+// busca manual.
+if (!existingCols.includes("nota_fiscal")) db.exec("ALTER TABLE orders ADD COLUMN nota_fiscal TEXT");
 
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
@@ -122,6 +127,7 @@ function rowToOrder(r) {
         rotuloUltimoEvento: r.carrier_status,
         wmsStatus: r.wms_status,
         temNota: r.tem_nota === 1,
+    notaFiscal: r.nota_fiscal,
       });
 
   const statusFinal = pior(envelhecido.status, previsao.status);
@@ -169,11 +175,11 @@ export function getOrder(orderNumber) {
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
-    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota,
+    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal,
     tracking_code, city, placed_at, last_event_at, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
-    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota,
+    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal,
     @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
@@ -188,6 +194,7 @@ const upsertStmt = db.prepare(`
     natureza = excluded.natureza,
     previsao_entrega = excluded.previsao_entrega,
     tem_nota = excluded.tem_nota,
+    nota_fiscal = excluded.nota_fiscal,
     tracking_code = excluded.tracking_code,
     city = excluded.city,
     placed_at = excluded.placed_at,
@@ -222,6 +229,7 @@ export function upsertOrder(partial) {
     bonificacao: partial.bonificacao !== undefined ? (partial.bonificacao ? 1 : 0) : (existing.bonificacao ? 1 : 0),
     natureza: partial.natureza ?? existing.natureza ?? null,
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
+    notaFiscal: partial.notaFiscal ?? existing.notaFiscal ?? null,
     temNota: partial.temNota !== undefined ? (partial.temNota ? 1 : 0) : (existing.temNota ? 1 : 0),
     trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
@@ -291,7 +299,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     const preencher = {};
 
     for (const campo of [
-      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega",
+      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaFiscal",
       "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
     ]) {
       const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
