@@ -85,10 +85,61 @@ function aplicarPrefs() {
   document.getElementById("optCliente").checked = prefs.cliente;
 }
 
+// ---------------------------------------------------------------------------
+// Indicador deslizante dos seletores
+// ---------------------------------------------------------------------------
+//
+// A marca do item ativo é UM elemento que se move entre as opções. Ver o
+// percurso diz de onde a seleção saiu e para onde foi; quando ela só pisca no
+// lugar novo, quem estava olhando outra parte da tela perde a transição e
+// precisa reprocurar onde está.
+//
+// A posição vem do layout real (offsetLeft/offsetWidth), não de cálculo por
+// índice: os rótulos têm larguras diferentes e a fila de lojas muda sozinha
+// conforme o período.
+function moverIndicador(container, primeiraVez = false) {
+  const el = typeof container === "string" ? document.getElementById(container) : container;
+  if (!el) return;
+
+  let ind = el.querySelector(":scope > .indicador");
+  if (!ind) {
+    ind = document.createElement("span");
+    ind.className = "indicador";
+    el.prepend(ind);
+    primeiraVez = true;
+  }
+
+  const ativo = el.querySelector('.seg[data-active="true"]');
+  if (!ativo) {
+    ind.style.width = "0px";
+    return;
+  }
+
+  if (primeiraVez) ind.classList.add("sem-transicao");
+  ind.style.width = ativo.offsetWidth + "px";
+  ind.style.transform = "translateX(" + ativo.offsetLeft + "px)";
+  if (primeiraVez) {
+    // Uma volta do laço de eventos antes de religar a transição, senão o
+    // navegador junta as duas mudanças e o salto acontece animado mesmo assim.
+    requestAnimationFrame(() => ind.classList.remove("sem-transicao"));
+  }
+}
+
+const SELETORES = ["periodos", "filters", "brandFilters", "optTamanho", "optForma", "optCor"];
+
+function moverTodosIndicadores() {
+  for (const id of SELETORES) moverIndicador(id);
+}
+
+// A largura dos botões muda com o tamanho da janela; sem isto o indicador
+// descola do rótulo depois de redimensionar.
+window.addEventListener("resize", moverTodosIndicadores);
+
 function marcarSegmento(idContainer, atributo, valor) {
   document.querySelectorAll(`#${idContainer} .seg`).forEach((b) => {
     b.dataset.active = String(b.dataset[atributo] === valor);
   });
+  moverIndicador(idContainer);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +306,8 @@ function montarMarcas(noPeriodo) {
   const marcas = [...new Set(noPeriodo.map((o) => o.brand).filter(Boolean))].sort();
   const assinatura = marcas.join("|");
 
-  if (assinatura !== state.marcasConhecidas) {
+  const reconstruiu = assinatura !== state.marcasConhecidas;
+  if (reconstruiu) {
     state.marcasConhecidas = assinatura;
     alvo.innerHTML = "";
     for (const m of ["all", ...marcas]) {
@@ -267,6 +319,7 @@ function montarMarcas(noPeriodo) {
     }
   }
   marcarSegmento("brandFilters", "brandfilter", state.brandFilter);
+  if (reconstruiu) moverIndicador("brandFilters", true);
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +435,12 @@ function sairTv() {
 // ---------------------------------------------------------------------------
 // Eventos
 // ---------------------------------------------------------------------------
-function abrirConfig() { document.getElementById("configBackdrop").classList.add("open"); }
+function abrirConfig() {
+  document.getElementById("configBackdrop").classList.add("open");
+  // Os seletores da janela nunca foram medidos ate ela abrir; sem isto o
+  // indicador aparece encolhido no primeiro clique.
+  for (const id of ["optTamanho", "optForma", "optCor"]) moverIndicador(id, true);
+}
 function fecharConfig() { document.getElementById("configBackdrop").classList.remove("open"); }
 
 function segmento(idContainer, atributo, aoEscolher) {
@@ -491,5 +549,9 @@ document.getElementById("syncBtn").addEventListener("click", async (e) => {
 
 aplicarPrefs();
 render();
+
+// As fontes chegam depois do primeiro render e mudam a largura dos rotulos --
+// sem reposicionar, o indicador fica deslocado ate alguem clicar.
+document.fonts?.ready.then(moverTodosIndicadores);
 poll();
 setInterval(poll, POLL_MS);
