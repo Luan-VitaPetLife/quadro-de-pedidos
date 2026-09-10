@@ -316,3 +316,26 @@ export function pior(a, b) {
   const ordem = { red: 0, amber: 1, green: 2 };
   return ordem[a] <= ordem[b] ? a : b;
 }
+
+/**
+ * O pedido saiu por uma transportadora que o quadro nao consulta?
+ *
+ * A operacao usa varias: Mandae (VITPT...), Correios/Mercado Envios (BR..., MEL...),
+ * Shopee (PPNGG...). So a Mandae tem integracao aqui. Os outros despachos
+ * chegam ao quadro pelo Bling, com codigo de rastreio e nada mais -- e nunca
+ * vao receber evento nenhum, porque nao ha de onde.
+ *
+ * Sem esta distincao eles caem no amarelo padrao de combineStatus e ficam
+ * eternamente como "aviso em aberto": 134 avisos que ninguem pode resolver.
+ * Isso e pior do que nao mostrar, porque ensina a ignorar o amarelo.
+ *
+ * O que se sabe deles e que FORAM DESPACHADOS -- e isso e uma boa noticia, nao
+ * uma pendencia. Ficam verdes, com marca propria no painel, e fora da regra de
+ * envelhecimento: cobrar silencio de quem nao tem como falar nao faz sentido.
+ */
+export function semAcompanhamento({ trackingCode, wmsStatus, carrierStatus }) {
+  if (!trackingCode) return false;
+  if (wmsStatus || carrierStatus) return false;
+  const prefixo = process.env.MANDAE_PREFIXO_RASTREIO || "VITPT";
+  return !String(trackingCode).toUpperCase().startsWith(prefixo.toUpperCase());
+}

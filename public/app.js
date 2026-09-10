@@ -133,6 +133,7 @@ function render() {
         rast.textContent = o.trackingCode;
         el.appendChild(rast);
       }
+      if (o.semAcompanhamento) el.classList.add("sem-acomp");
       if (o.bonificacao) {
         const b = document.createElement("span");
         b.className = "boni";
@@ -257,6 +258,15 @@ function openPanel(orderNumber) {
     m.className = "motivo";
     m.textContent = o.motivoStatus + ". Último evento conhecido: " + (o.carrierStatus || o.wmsStatus || "nenhum") + ".";
     panel.appendChild(m);
+  }
+
+  if (o.semAcompanhamento) {
+    const n = document.createElement("div");
+    n.className = "motivo neutro";
+    n.textContent =
+      "Despachado por transportadora que o quadro nao consulta (so a Mandaê tem integração). " +
+      "Sabemos que saiu; não haverá mais eventos por aqui.";
+    panel.appendChild(n);
   }
 
   panel.appendChild(campo("Cliente", o.customer));
