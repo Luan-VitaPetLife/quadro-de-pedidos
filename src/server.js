@@ -7,6 +7,7 @@ import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
+import { handleInvestigar } from "./webhooks/investigar.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
 import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar } from "./webhooks/bling.js";
 
@@ -72,6 +73,9 @@ app.get("/bling/status", handleStatus);
 app.get("/bling/diagnostico", handleDiagnostico);
 app.post("/bling/sincronizar", handleSincronizar);
 app.post("/bling/limpar", handleLimpar);
+
+// Rastreia um pedido/cliente nos tres sistemas -- a ferramenta de cacar pedido perdido.
+app.get("/api/investigar", handleInvestigar);
 
 // Diagnostico do PROCESSO: como a instancia anterior terminou, quantas vezes
 // ja subiu neste volume, ha quanto tempo esta de pe. E o que responde "por que
