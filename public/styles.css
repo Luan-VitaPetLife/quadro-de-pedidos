@@ -333,3 +333,12 @@ header.top .sync .dot {
 .sq:hover { transform: scale(1.04); }
 
 .boni-tag { border-color: var(--accent); color: var(--accent); }
+
+/* Despacho por transportadora sem integração: verde (saiu), mas com a borda
+   tracejada avisando que não virão mais eventos. Sem isso, ele se confunde
+   com um pedido que o quadro está realmente acompanhando. */
+.sq.sem-acomp { border-style: dashed; opacity: 0.82; }
+.motivo.neutro {
+  background: var(--accent-soft);
+  border-color: var(--line-strong);
+}

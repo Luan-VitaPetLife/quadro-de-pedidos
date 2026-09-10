@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,21 +92,34 @@ function rowToOrder(r) {
   // verde para sempre -- exatamente o caso que a regra existe para pegar.
   // Calculando na leitura, o quadrado amarela sozinho com o passar dos dias,
   // sem depender de nada acontecer.
-  const envelhecido = aplicarEnvelhecimento({
-    status: r.status,
-    lastEventAt: r.last_event_at,
-    rotuloUltimoEvento: r.carrier_status,
+  // Despacho por transportadora que nao consultamos: sabe-se que saiu, e so.
+  // Nao envelhece nem entra em regra de prazo -- nao ha fonte que possa
+  // desmentir ou confirmar.
+  const naoAcompanhado = semAcompanhamento({
+    trackingCode: r.tracking_code,
     wmsStatus: r.wms_status,
+    carrierStatus: r.carrier_status,
   });
+
+  const envelhecido = naoAcompanhado
+    ? { status: "green", diasParados: 0, motivo: null }
+    : aplicarEnvelhecimento({
+        status: r.status,
+        lastEventAt: r.last_event_at,
+        rotuloUltimoEvento: r.carrier_status,
+        wmsStatus: r.wms_status,
+      });
 
   // Segunda regra de leitura: o prazo prometido. O envelhecimento pega o
   // pedido que parou; esta pega o que anda devagar demais pra data combinada.
-  const previsao = avaliarPrevisao({
-    status: envelhecido.status,
-    previsaoEntrega: r.previsao_entrega,
-    rotuloUltimoEvento: r.carrier_status,
-    wmsStatus: r.wms_status,
-  });
+  const previsao = naoAcompanhado
+    ? { status: "green", motivo: null, diasAtePrevisao: null }
+    : avaliarPrevisao({
+        status: envelhecido.status,
+        previsaoEntrega: r.previsao_entrega,
+        rotuloUltimoEvento: r.carrier_status,
+        wmsStatus: r.wms_status,
+      });
 
   const statusFinal = pior(envelhecido.status, previsao.status);
   const motivo = previsao.motivo || envelhecido.motivo;
@@ -122,6 +135,7 @@ function rowToOrder(r) {
     diasParados: envelhecido.diasParados,
     motivoStatus: motivo,
     diasAtePrevisao: previsao.diasAtePrevisao,
+    semAcompanhamento: naoAcompanhado,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
     wmsStatus: r.wms_status,
     carrierStatus: r.carrier_status,
