@@ -135,6 +135,9 @@ export async function handleInvestigar(req, res) {
         // A Mandae recebe o numero da nota como referencia do parceiro em
         // varios casos -- e por isso que o quadro tem quadrados "000222".
         estaNoQuadroPeloNumeroDaNota: !!getOrder(numeroNota),
+        // Sonda: a nota carrega rastreio/transportadora? So o dado real responde.
+        camposDaNota: detalhe ? Object.keys(detalhe) : null,
+        transporteDaNota: detalhe?.transporte ?? null,
       });
     }
 
