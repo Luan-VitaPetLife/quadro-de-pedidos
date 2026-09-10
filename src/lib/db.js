@@ -52,6 +52,7 @@ db.exec(`
     bonificacao INTEGER,
     natureza TEXT,
     previsao_entrega TEXT,
+    tem_nota INTEGER,
     tracking_code TEXT,
     city TEXT,
     placed_at TEXT,
@@ -77,6 +78,7 @@ if (!existingCols.includes("carrier_severity")) {
 if (!existingCols.includes("bonificacao")) db.exec("ALTER TABLE orders ADD COLUMN bonificacao INTEGER");
 if (!existingCols.includes("natureza")) db.exec("ALTER TABLE orders ADD COLUMN natureza TEXT");
 if (!existingCols.includes("previsao_entrega")) db.exec("ALTER TABLE orders ADD COLUMN previsao_entrega TEXT");
+if (!existingCols.includes("tem_nota")) db.exec("ALTER TABLE orders ADD COLUMN tem_nota INTEGER");
 
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
@@ -119,6 +121,7 @@ function rowToOrder(r) {
         previsaoEntrega: r.previsao_entrega,
         rotuloUltimoEvento: r.carrier_status,
         wmsStatus: r.wms_status,
+        temNota: r.tem_nota === 1,
       });
 
   const statusFinal = pior(envelhecido.status, previsao.status);
@@ -148,6 +151,9 @@ function rowToOrder(r) {
     bonificacao: r.bonificacao === 1,
     natureza: r.natureza,
     previsaoEntrega: r.previsao_entrega,
+    // Nota emitida separa "ainda nao faturado" de "a caminho" -- a regra de
+    // prazo muda de sentido conforme isso.
+    temNota: r.tem_nota === 1,
     trackingCode: r.tracking_code,
     city: r.city,
     placedAt: r.placed_at,
@@ -163,11 +169,11 @@ export function getOrder(orderNumber) {
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
-    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega,
+    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota,
     tracking_code, city, placed_at, last_event_at, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
-    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega,
+    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota,
     @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
@@ -181,6 +187,7 @@ const upsertStmt = db.prepare(`
     bonificacao = excluded.bonificacao,
     natureza = excluded.natureza,
     previsao_entrega = excluded.previsao_entrega,
+    tem_nota = excluded.tem_nota,
     tracking_code = excluded.tracking_code,
     city = excluded.city,
     placed_at = excluded.placed_at,
@@ -215,6 +222,7 @@ export function upsertOrder(partial) {
     bonificacao: partial.bonificacao !== undefined ? (partial.bonificacao ? 1 : 0) : (existing.bonificacao ? 1 : 0),
     natureza: partial.natureza ?? existing.natureza ?? null,
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
+    temNota: partial.temNota !== undefined ? (partial.temNota ? 1 : 0) : (existing.temNota ? 1 : 0),
     trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
     placedAt: partial.placedAt ?? existing.placedAt ?? null,
@@ -296,6 +304,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     // Bonificacao e verdade sobre a venda, nao sobre o quadrado: se QUALQUER
     // dos registros mesclados era bonificacao, o resultado e bonificacao.
     if (linha.bonificacao) preencher.bonificacao = true;
+    if (linha.temNota) preencher.temNota = true;
 
     const datas = [atual.lastEventAt, linha.lastEventAt].filter(Boolean).sort();
     if (datas.length) preencher.lastEventAt = datas[datas.length - 1];

@@ -259,6 +259,7 @@ export function avaliarPrevisao({
   previsaoEntrega,
   rotuloUltimoEvento,
   wmsStatus,
+  temNota,
   agora = new Date(),
 }) {
   const inalterado = { status, motivo: null, diasAtePrevisao: null };
@@ -266,6 +267,27 @@ export function avaliarPrevisao({
 
   // Pedido entregue nao tem prazo a cumprir -- ja cumpriu.
   if (ehEventoFinal(rotuloUltimoEvento)) return inalterado;
+
+  // PEDIDO SEM NOTA: a data prevista significa OUTRA COISA.
+  //
+  // Nos pedidos de Shopee e Mercado Livre, a "data prevista" que o Bling mostra
+  // e o prazo maximo pra EMITIR A NOTA e despachar -- nao a previsao de
+  // entrega. Ficar "Aguardando Envio" antes dessa data e o funcionamento
+  // normal, e a maioria dos pedidos passa por ai. So vira problema se a data
+  // passar e o pedido continuar sem nota.
+  if (!temNota) {
+    const limite = dataLocal(previsaoEntrega);
+    const agoraDia = dataLocal(agora);
+    if (!limite || !agoraDia || !/^\d{4}-\d{2}-\d{2}$/.test(limite) || limite < "2000-01-01") return inalterado;
+    if (limite < agoraDia) {
+      return {
+        status: "red",
+        motivo: `Prazo para emitir a nota era ${limite.split("-").reverse().join("/")} e o pedido segue sem nota`,
+        diasAtePrevisao: -diasUteisDesde(limite, agora),
+      };
+    }
+    return { ...inalterado, diasAtePrevisao: diasUteisDesde(agoraDia, limite) };
+  }
 
   // SEM NOTICIA DE NINGUEM, NAO DA PRA ACUSAR ATRASO.
   //

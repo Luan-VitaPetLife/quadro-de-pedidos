@@ -1,39 +1,86 @@
-// Sincronizacao com o Bling: cadastro e PONTE entre os outros dois sistemas.
+// Sincronizacao com o Bling: cadastro, PONTE e descoberta.
 //
-// Roda DENTRO do quadro (Railway), diferente do sync da FontesLog: o Bling nao
-// tem captcha, entao uma vez autorizado o proprio servidor consulta sozinho.
+// ORDEM DAS COISAS, e por que ela e assim:
 //
-// O QUE ELA FAZ, e por que:
+// 1. Le as NOTAS primeiro e monta um mapa por ID. A nota tem a NATUREZA DE
+//    OPERACAO (que decide bonificacao) e o NUMERO -- e o numero da nota e a
+//    referencia que a Mandae usa, entao ele precisa virar apelido na mesclagem.
 //
-// O Bling manda referencias diferentes para cada sistema. O WMS recebe o
-// `numero` do Bling ("1445"); a Mandae recebe o `numeroLoja` do marketplace
-// ("7416887836984") -- e as vezes nem isso, e o pedido entra pelo codigo de
-// rastreio. Resultado: a mesma venda ocupa dois ou tres quadrados.
+// 2. Le os PEDIDOS. O pedido tem o que a nota NAO tem: o codigo de rastreio
+//    (`transporte.volumes[].codigoRastreamento`) e a data prevista. E traz
+//    `notaFiscal: {id}` -- so o id, sem numero, que foi exatamente o que
+//    quebrou a primeira tentativa de mesclagem.
 //
-// So o Bling conhece as tres chaves ao mesmo tempo. Entao esta rotina le os
-// pedidos dele, adota o `numero` como chave canonica (e a que o WMS usa e a
-// que a operacao reconhece) e mescla os quadrados duplicados nela. De quebra
-// preenche cliente, loja e cidade, que nem o WMS nem a Mandae tem.
+// 3. As notas que nenhum pedido referenciou viram quadrado proprio. Sao as
+//    remessas que nascem direto como nota: doacao e bonificacao.
 //
-// NAO mexe em cor: quem diz se o pedido esta bem ou mal sao o WMS e a
-// transportadora. A `situacao` do Bling e ignorada de proposito.
+// O caso que ensinou tudo isso: o pedido 1462 (VITPT000416) e a nota 000262
+// eram a MESMA venda ocupando dois quadrados -- um com rastreio e outro
+// dizendo "sem acompanhamento".
 
-import { listarPedidos, detalhePedido, extrairDoPedido, nomeDaLoja } from "./integrations/bling.js";
+import {
+  listarPedidos,
+  detalhePedido,
+  extrairDoPedido,
+  nomeDaLoja,
+  listarNotas,
+  detalheNota,
+  naturezasDeOperacao,
+  ehNaturezaDeBonificacao,
+} from "./integrations/bling.js";
 import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido } from "./lib/db.js";
+
+/**
+ * Mapa das notas do periodo, indexado pelo ID (que e como o pedido as
+ * referencia). Guarda tambem quais foram consumidas por algum pedido, pra
+ * saber no fim quais precisam de quadrado proprio.
+ */
+async function lerNotas({ dataDe, dataAte }) {
+  const naturezas = await naturezasDeOperacao();
+  const lista = await listarNotas({ dataDe, dataAte });
+  const porId = new Map();
+
+  for (const n of lista) {
+    let detalhe = null;
+    try {
+      detalhe = await detalheNota(n.id);
+    } catch (err) {
+      console.warn(`[bling] nota ${n.numero ?? n.id}: ${err.message}`);
+    }
+    const idNatureza = detalhe?.naturezaOperacao?.id ?? n?.naturezaOperacao?.id;
+    const natureza = naturezas[String(idNatureza)] || detalhe?.naturezaOperacao?.descricao || null;
+
+    porId.set(String(n.id), {
+      id: String(n.id),
+      numero: String(n.numero ?? detalhe?.numero ?? "").trim() || null,
+      natureza,
+      bonificacao: ehNaturezaDeBonificacao(natureza),
+      cliente: detalhe?.contato?.nome || n?.contato?.nome || null,
+      lojaId: detalhe?.loja?.id ?? n?.loja?.id ?? null,
+      emissao: n.dataEmissao || detalhe?.dataEmissao || null,
+      transportador: detalhe?.transporte?.transportador?.nome || null,
+      usada: false,
+    });
+  }
+
+  console.log(`[bling] ${porId.size} nota(s) lida(s).`);
+  return porId;
+}
 
 export async function runSyncBling({ dias = 30 } = {}) {
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - dias * 86400000);
 
-  console.log(`[bling] lendo pedidos dos ultimos ${dias} dia(s)...`);
+  console.log(`[bling] sincronizando os ultimos ${dias} dia(s)...`);
+  const notas = await lerNotas({ dataDe: inicio, dataAte: hoje });
+
   const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
   console.log(`[bling] ${lista.length} pedido(s) na listagem.`);
 
-  const resumo = { lidos: lista.length, comRastreio: 0, mesclados: 0, atualizados: 0, ignorados: 0, criados: 0, removidos: 0, erros: 0 };
+  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0 };
 
   for (const resumido of lista) {
     try {
-      // O rastreio so existe no DETALHE -- a listagem nao traz transporte.
       const detalhe = await detalhePedido(resumido.id);
       const dados = extrairDoPedido(detalhe);
       if (!dados?.numeroPedido) continue;
@@ -41,98 +88,90 @@ export async function runSyncBling({ dias = 30 } = {}) {
       const canonico = dados.numeroPedido;
       const numeroLoja = detalhe?.numeroLoja ? String(detalhe.numeroLoja).trim() : null;
 
-      // Os quadrados que podem ser a MESMA venda entrada por outra porta.
-      // O numero da NOTA entra como apelido porque a Mandae usa a NF como
-      // referencia do parceiro em varios casos -- e por isso que existiam
-      // quadrados chamados "000222". Sem esse apelido, o mesmo despacho ficava
-      // em dois quadrados: um pelo numero do pedido e outro pelo da nota.
-      const numeroNota = detalhe?.notaFiscal?.numero ? String(detalhe.notaFiscal.numero).trim() : null;
-      const apelidos = [numeroLoja, numeroNota, dados.trackingCode].filter(Boolean);
-      const merge = mesclarEmCanonico(canonico, apelidos);
-      resumo.mesclados += merge.mesclados;
+      // O pedido referencia a nota SO PELO ID. Buscar o numero no mapa e o que
+      // permite usa-lo como apelido -- sem isso, o quadrado criado pela Mandae
+      // (que usa o numero da NF) nunca se junta ao do pedido.
+      const nota = detalhe?.notaFiscal?.id ? notas.get(String(detalhe.notaFiscal.id)) : null;
+      if (nota) nota.usada = true;
 
-      if (dados.trackingCode) resumo.comRastreio++;
+      const apelidos = [numeroLoja, nota?.numero, dados.trackingCode].filter(Boolean);
+      r.mesclados += mesclarEmCanonico(canonico, apelidos).mesclados;
 
-      // O Bling ENRIQUECE e UNE -- nao cria quadrado.
-      //
-      // Aprendido na pratica: deixar o Bling criar encheu o quadro de 158
-      // quadrados amarelos falsos. Sao vendas que ainda nao chegaram ao WMS,
-      // ou que saem por logistica de marketplace e nunca passam por ele. Sem
-      // status de nenhuma das duas fontes, combineStatus() devolve amarelo por
-      // padrao -- e amarelo, no nosso quadro, significa "aviso em aberto".
-      // Cento e cinquenta e oito avisos que nao existem.
-      //
-      // Quem decide que um pedido merece um quadrado sao o WMS e a
-      // transportadora, que e onde a operacao acontece. O Bling entra depois,
-      // pra dizer de quem e o pedido e pra juntar o que estava separado.
-      // ...MAS um pedido DESPACHADO merece quadrado, mesmo que nem o WMS nem a
-      // transportadora tenham falado dele ainda.
-      //
-      // Caso que obrigou essa regra: o pedido 933 saiu em 23/07 com rastreio
-      // VITPT000002 e simplesmente nao existia no quadro. Nada no sistema
-      // conseguia DESCOBRI-LO: o webhook da Mandae so avisa do que acontece
-      // dali pra frente, a leitura do WMS cobre 30 dias, e o Bling (ate aqui)
-      // nao criava nada. Pedido despachado que some do radar e exatamente o que
-      // este quadro existe pra impedir.
-      //
-      // Ter codigo de rastreio e a prova de que saiu. Sem rastreio, o pedido
-      // ainda nao virou entrega -- esse continua de fora.
+      if (dados.trackingCode) r.comRastreio++;
+      if (nota?.bonificacao) r.bonificacoes++;
+
+      // Merece quadrado se ja existe, se foi despachado (tem rastreio) ou se
+      // ja tem nota emitida. Pedido sem nada disso ainda nao virou entrega.
       const jaExiste = !!getOrder(canonico);
-      if (!jaExiste && !dados.trackingCode) {
-        resumo.ignorados++;
+      if (!jaExiste && !dados.trackingCode && !nota) {
+        r.ignorados++;
         continue;
       }
-      if (!jaExiste) resumo.criados++;
+      if (!jaExiste) r.criados++;
 
       upsertOrder({
         orderNumber: canonico,
-        customer: dados.cliente || undefined,
-        brand: (await nomeDaLoja(detalhe?.loja?.id)) || dados.loja || undefined,
+        customer: dados.cliente || nota?.cliente || undefined,
+        brand: (await nomeDaLoja(detalhe?.loja?.id)) || undefined,
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
         trackingCode: dados.trackingCode || undefined,
         placedAt: dados.data || undefined,
-        // dataPrevista e a previsao de entrega do Bling. E o que permite dizer
-        // "esse pedido deveria estar a caminho" antes de o prazo estourar.
         previsaoEntrega: detalhe?.dataPrevista || undefined,
+        natureza: nota?.natureza || undefined,
+        bonificacao: nota?.bonificacao || undefined,
+        // Nota emitida e o marco que separa "ainda nao faturado" de "a caminho".
+        // A regra de prazo usa isso: pra pedido sem nota, a data prevista e o
+        // limite pra emitir a NF, nao a previsao de entrega.
+        temNota: !!nota,
       });
-      resumo.atualizados++;
+      r.gravados++;
     } catch (err) {
-      resumo.erros++;
+      r.erros++;
       console.error(`[bling] falha no pedido ${resumido?.numero ?? resumido?.id}: ${err.message}`);
-      if (err.message.startsWith("BLING_NAO_AUTORIZADO")) throw err; // nao adianta seguir
+      if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) throw err;
     }
   }
 
-  resumo.removidos = limparPedidosSemStatus();
+  // Notas que nenhum pedido referenciou: remessas que nasceram como nota.
+  for (const nota of notas.values()) {
+    if (nota.usada || !nota.numero) continue;
+    const jaExiste = !!getOrder(nota.numero);
+    if (!jaExiste && !nota.transportador) continue;
+    if (!jaExiste) r.notasSoltas++;
+    if (nota.bonificacao) r.bonificacoes++;
 
+    upsertOrder({
+      orderNumber: nota.numero,
+      customer: nota.cliente || undefined,
+      brand: (await nomeDaLoja(nota.lojaId)) || undefined,
+      natureza: nota.natureza || undefined,
+      bonificacao: nota.bonificacao || undefined,
+      placedAt: nota.emissao || undefined,
+      temNota: true,
+    });
+  }
+
+  r.removidos = limparPedidosSemStatus();
   setMeta("lastBlingSyncAt", new Date().toISOString());
+  setMeta("lastNotasSyncAt", new Date().toISOString());
+
   console.log(
-    `[bling] concluido: ${resumo.atualizados} enriquecido(s), ${resumo.comRastreio} com rastreio, ` +
-      `${resumo.mesclados} duplicado(s) mesclado(s), ${resumo.criados} novo(s) no radar, ` +
-      `${resumo.ignorados} sem rastreio (ignorado), ` +
-      `${resumo.removidos} sem status removido(s), ${resumo.erros} erro(s).`
+    `[bling] concluido: ${r.gravados} pedido(s) gravado(s), ${r.comRastreio} com rastreio, ` +
+      `${r.mesclados} duplicado(s) mesclado(s), ${r.criados} novo(s), ${r.notasSoltas} nota(s) sem pedido, ` +
+      `${r.bonificacoes} bonificacao(oes), ${r.ignorados} ignorado(s), ${r.removidos} removido(s), ${r.erros} erro(s).`
   );
-  return resumo;
+  return r;
 }
 
 /**
- * Remove do quadro os pedidos que nao tem status de NENHUMA das duas fontes.
- *
- * Um pedido sem wmsStatus e sem carrierStatus so pode ter vindo do cadastro do
- * Bling -- o WMS e a Mandae sempre gravam um status junto. Esses registros
- * apareciam como amarelo (o padrao de combineStatus quando nao ha severidade
- * nenhuma), fingindo um aviso que nao existe.
- *
- * Existe pra limpar o que a versao anterior desta sincronizacao criou. Como so
- * apaga registro sem nenhuma informacao de operacao, nao ha o que se perder:
- * se o pedido voltar pelo WMS ou pela Mandae, ele entra de novo com status de
- * verdade.
+ * Remove do quadro registro que nao tem informacao nenhuma de operacao: sem
+ * status das duas fontes, sem rastreio e sem nota. Se voltar por qualquer uma
+ * delas, entra de novo com dado de verdade.
  */
 export function limparPedidosSemStatus() {
-  // Nao apaga quem tem codigo de rastreio: esse pedido SAIU, e o status da
-  // transportadora chega no proximo ciclo. Sem esta guarda, a limpeza
-  // desfaria na mesma rodada a descoberta que o Bling acabou de fazer.
-  const semStatus = listOrders().filter((o) => !o.wmsStatus && !o.carrierStatus && !o.trackingCode);
-  for (const o of semStatus) apagarPedido(o.orderNumber);
-  return semStatus.length;
+  const semNada = listOrders().filter(
+    (o) => !o.wmsStatus && !o.carrierStatus && !o.trackingCode && !o.temNota
+  );
+  for (const o of semNada) apagarPedido(o.orderNumber);
+  return semNada.length;
 }
