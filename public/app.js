@@ -276,6 +276,7 @@ function openPanel(orderNumber) {
   panel.appendChild(campo("Cliente", o.customer));
   panel.appendChild(campo("Status FontesLog (WMS)", o.wmsStatus || "sem dado ainda"));
   panel.appendChild(campo("Último evento Mandaê", o.carrierStatus || "sem dado ainda"));
+  panel.appendChild(campo("Nota fiscal", o.notaFiscal, true));
   panel.appendChild(campo("Código de rastreio", o.trackingCode, true));
   panel.appendChild(campo("Destino", o.city));
   panel.appendChild(campo("Natureza da operação", o.natureza));

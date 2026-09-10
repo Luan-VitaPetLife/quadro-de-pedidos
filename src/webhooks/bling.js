@@ -203,3 +203,33 @@ export async function handleLimpar(req, res) {
 // (A sincronizacao de notas foi absorvida por /bling/sincronizar: notas e
 // pedidos agora sao lidos na mesma passada, porque o vinculo entre eles e por
 // ID e so da pra resolver com os dois em maos.)
+
+// GET /bling/sonda?s=<segredo>&caminho=/algum/endpoint&p1=v1
+//
+// Ferramenta de exploracao da API do Bling. Existe porque a documentacao deles
+// e uma SPA que nao da pra ler de fora: cada campo novo precisou ser descoberto
+// contra a API real, e sem isto cada tentativa custava um deploy inteiro.
+//
+// SO LEITURA, e so no dominio do Bling: o caminho e concatenado na base fixa da
+// API, entao nao da pra apontar pra outro servidor. Protegida pelo mesmo
+// segredo das demais rotas administrativas.
+export async function handleSonda(req, res) {
+  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
+
+  const caminho = String(req.query?.caminho || "");
+  if (!caminho.startsWith("/") || caminho.includes("..")) {
+    return res.status(400).json({ error: 'informe ?caminho=/endpoint (comecando com "/", sem "..")' });
+  }
+
+  const params = { ...req.query };
+  delete params.s;
+  delete params.caminho;
+
+  try {
+    const { sondarCaminho } = await import("../integrations/bling.js");
+    const dados = await sondarCaminho(caminho, params);
+    res.json({ caminho, params, resposta: dados });
+  } catch (err) {
+    res.status(502).json({ caminho, erro: err.message });
+  }
+}
