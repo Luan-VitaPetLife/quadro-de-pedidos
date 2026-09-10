@@ -18,7 +18,7 @@
 // NAO mexe em cor: quem diz se o pedido esta bem ou mal sao o WMS e a
 // transportadora. A `situacao` do Bling e ignorada de proposito.
 
-import { listarPedidos, detalhePedido, extrairDoPedido } from "./integrations/bling.js";
+import { listarPedidos, detalhePedido, extrairDoPedido, nomeDaLoja } from "./integrations/bling.js";
 import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido } from "./lib/db.js";
 
 export async function runSyncBling({ dias = 30 } = {}) {
@@ -68,7 +68,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
       upsertOrder({
         orderNumber: canonico,
         customer: dados.cliente || undefined,
-        brand: dados.loja || undefined,
+        brand: (await nomeDaLoja(detalhe?.loja?.id)) || dados.loja || undefined,
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
         trackingCode: dados.trackingCode || undefined,
         placedAt: dados.data || undefined,

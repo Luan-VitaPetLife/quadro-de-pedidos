@@ -185,6 +185,33 @@ export async function listarPedidos({ dataDe, dataAte, maxPaginas = 50 } = {}) {
   return todos;
 }
 
+// O detalhe do pedido traz a loja so como id numerico ("loja": {"id": 205761639}).
+// Um id nao diz nada na tela -- o filtro de marcas do quadro so serve pra
+// alguma coisa com "Shopee", "Amazon", "Coco and Luna". O nome vem de /lojas,
+// e como sao poucas lojas e elas nao mudam, uma consulta por loja basta para a
+// vida toda do processo.
+const nomesDeLoja = new Map();
+
+export async function nomeDaLoja(id) {
+  if (id == null) return null;
+  const chave = String(id);
+  if (nomesDeLoja.has(chave)) return nomesDeLoja.get(chave);
+
+  let nome = null;
+  try {
+    const dados = await blingFetch(`/lojas/${encodeURIComponent(chave)}`);
+    nome = dados?.data?.nome || dados?.data?.descricao || null;
+  } catch (err) {
+    // Se o endpoint nao existir ou o escopo nao cobrir, seguimos com o id.
+    // Nome de loja e enfeite: nao vale derrubar a sincronizacao inteira.
+    console.warn(`[bling] nao consegui o nome da loja ${chave}: ${err.message}`);
+  }
+
+  const resultado = nome || `Loja ${chave}`;
+  nomesDeLoja.set(chave, resultado);
+  return resultado;
+}
+
 /** Detalhe de um pedido -- e onde mora o transporte/volumes/codigoRastreamento. */
 export async function detalhePedido(id) {
   const dados = await blingFetch(`/pedidos/vendas/${encodeURIComponent(id)}`);
