@@ -39,7 +39,7 @@ const RED_PATTERNS = [
   /nota fiscal divergente|invalida/, // 42
   /incidente.*veiculo/, // 58
   /destinatario desconhecido/, // 64
-  /em devolucao/, // 66
+  /devolucao|devolvid/, // 66 -- casa tambem "em rota de devolucao"
   /sem documento de identificacao/, // 74
   /mudou de endereco/, // 77
   /violada|avariad/, // 78, 79, 11
@@ -57,6 +57,10 @@ const AMBER_PATTERNS = [
   /problema operacional|na rota/, // 75
   /outro tipo de ocorrencia/, // 99
   /aguardando/,
+  // A Mandae responde isso quando ainda nao ha evento nenhum. Amarelo aqui e
+  // DECISAO, nao acidente: nao ha noticia, e se continuar assim por 5 dias
+  // uteis o envelhecimento leva pra vermelho.
+  /nenhuma atualizacao/,
 ];
 
 const GREEN_PATTERNS = [
@@ -68,6 +72,12 @@ const GREEN_PATTERNS = [
   /encomenda conferida/, // 101
   /recebeu as informacoes/, // 109
   /encomenda processada|objeto postado/, // 110
+  // Textos confirmados na operacao (nao vieram da doc): a Mandae usa estes
+  // com frequencia e todos sao andamento normal.
+  /recebida na unidade/,   // chegou ao centro da transportadora
+  /em rota/,               // em deslocamento (RED e checado antes, entao
+                           // "em rota de devolucao" continua vermelho)
+  /encaminhada/,           // seguiu para a proxima etapa
 ];
 
 function matchesAny(patterns, text) {
