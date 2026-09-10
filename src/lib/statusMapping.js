@@ -334,8 +334,16 @@ export function pior(a, b) {
  * envelhecimento: cobrar silencio de quem nao tem como falar nao faz sentido.
  */
 export function semAcompanhamento({ trackingCode, wmsStatus, carrierStatus }) {
-  if (!trackingCode) return false;
+  // Alguma fonte que o quadro consulta ja falou? Entao ha base pra diagnostico.
   if (wmsStatus || carrierStatus) return false;
+
+  // Rastreio da Mandae sem evento ainda e caso diferente: ela E consultada, e o
+  // silencio dela E informacao -- esse pedido deve envelhecer normalmente.
   const prefixo = process.env.MANDAE_PREFIXO_RASTREIO || "VITPT";
-  return !String(trackingCode).toUpperCase().startsWith(prefixo.toUpperCase());
+  if (trackingCode && String(trackingCode).toUpperCase().startsWith(prefixo.toUpperCase())) return false;
+
+  // Sobra: despacho por transportadora que nao consultamos, ou remessa que
+  // entrou pela nota fiscal sem rastreio. Nos dois casos o quadro nao tem, e
+  // nao vai ter, base nenhuma pra dizer se esta bem ou mal.
+  return true;
 }
