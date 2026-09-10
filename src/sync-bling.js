@@ -27,6 +27,7 @@ import {
   detalheNota,
   naturezasDeOperacao,
   ehNaturezaDeBonificacao,
+  objetoDePostagem,
 } from "./integrations/bling.js";
 import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido } from "./lib/db.js";
 
@@ -59,6 +60,10 @@ async function lerNotas({ dataDe, dataAte }) {
       lojaId: detalhe?.loja?.id ?? n?.loja?.id ?? null,
       emissao: n.dataEmissao || detalhe?.dataEmissao || null,
       transportador: detalhe?.transporte?.transportador?.nome || null,
+      // O id do volume e a chave do OBJETO DE POSTAGEM, que e onde o codigo de
+      // rastreio realmente mora. A nota devolve so o id; o codigo vem de
+      // /logisticas/objetos/{id}.
+      volumes: (detalhe?.transporte?.volumes || []).map((v) => v?.id).filter(Boolean),
       usada: false,
     });
   }
@@ -94,16 +99,30 @@ export async function runSyncBling({ dias = 30 } = {}) {
       const nota = detalhe?.notaFiscal?.id ? notas.get(String(detalhe.notaFiscal.id)) : null;
       if (nota) nota.usada = true;
 
-      const apelidos = [numeroLoja, nota?.numero, dados.trackingCode].filter(Boolean);
+      // O pedido normalmente traz o rastreio em transporte.volumes[].codigoRastreamento,
+      // mas nem sempre. Quando faltar, o objeto de postagem tem -- e o quadro
+      // nao pode exibir "sem rastreio" para uma remessa que tem um.
+      let rastreio = dados.trackingCode;
+      if (!rastreio) {
+        for (const v of detalhe?.transporte?.volumes || []) {
+          const objeto = await objetoDePostagem(v?.id);
+          if (objeto?.rastreio) {
+            rastreio = objeto.rastreio;
+            break;
+          }
+        }
+      }
+
+      const apelidos = [numeroLoja, nota?.numero, rastreio].filter(Boolean);
       r.mesclados += mesclarEmCanonico(canonico, apelidos).mesclados;
 
-      if (dados.trackingCode) r.comRastreio++;
+      if (rastreio) r.comRastreio++;
       if (nota?.bonificacao) r.bonificacoes++;
 
       // Merece quadrado se ja existe, se foi despachado (tem rastreio) ou se
       // ja tem nota emitida. Pedido sem nada disso ainda nao virou entrega.
       const jaExiste = !!getOrder(canonico);
-      if (!jaExiste && !dados.trackingCode && !nota) {
+      if (!jaExiste && !rastreio && !nota) {
         r.ignorados++;
         continue;
       }
@@ -114,7 +133,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
         customer: dados.cliente || nota?.cliente || undefined,
         brand: (await nomeDaLoja(detalhe?.loja?.id)) || undefined,
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
-        trackingCode: dados.trackingCode || undefined,
+        trackingCode: rastreio || undefined,
         placedAt: dados.data || undefined,
         previsaoEntrega: detalhe?.dataPrevista || undefined,
         natureza: nota?.natureza || undefined,
@@ -136,12 +155,26 @@ export async function runSyncBling({ dias = 30 } = {}) {
   for (const nota of notas.values()) {
     if (nota.usada || !nota.numero) continue;
     const jaExiste = !!getOrder(nota.numero);
-    if (!jaExiste && !nota.transportador) continue;
+    // Sem pedido pra dar o rastreio, busca no OBJETO DE POSTAGEM. E o que tira
+    // esses quadrados do estado "pontilhado, sem informacao nenhuma": a nota so
+    // devolve volumes:[{id}], mas /logisticas/objetos/{id} devolve o codigo.
+    let rastreio = null;
+    for (const idVolume of nota.volumes || []) {
+      const objeto = await objetoDePostagem(idVolume);
+      if (objeto?.rastreio) {
+        rastreio = objeto.rastreio;
+        break;
+      }
+    }
+
+    if (!jaExiste && !nota.transportador && !rastreio) continue;
     if (!jaExiste) r.notasSoltas++;
     if (nota.bonificacao) r.bonificacoes++;
+    if (rastreio) r.comRastreio++;
 
     upsertOrder({
       orderNumber: nota.numero,
+      trackingCode: rastreio || undefined,
       customer: nota.cliente || undefined,
       brand: (await nomeDaLoja(nota.lojaId)) || undefined,
       natureza: nota.natureza || undefined,

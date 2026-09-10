@@ -352,3 +352,36 @@ export function ehNaturezaDeBonificacao(nome) {
 export async function sondarCaminho(caminho, params = {}) {
   return blingFetch(caminho, params);
 }
+
+/**
+ * Objeto de postagem (o "volume") -- e AQUI que mora o codigo de rastreio.
+ *
+ * Descoberto sondando a API: nem o pedido nem a nota expoem o rastreio de
+ * forma confiavel. O pedido as vezes traz em transporte.volumes[].codigoRastreamento,
+ * mas a NOTA so devolve volumes:[{id}] -- e remessa de bonificacao costuma
+ * nascer como nota, sem pedido nenhum. Sao esses os quadrados que ficavam
+ * "pontilhados", sem rastreio e sem informacao.
+ *
+ * GET /logisticas/objetos/{idVolume} devolve:
+ *   rastreamento.codigo, servico.nome, e os vinculos pedidoVenda.id e
+ *   notaFiscal.id -- ou seja, tambem serve de ponte entre os dois.
+ */
+export async function objetoDePostagem(idVolume) {
+  if (!idVolume) return null;
+  try {
+    const dados = await blingFetch(`/logisticas/objetos/${encodeURIComponent(idVolume)}`);
+    const o = dados?.data;
+    if (!o) return null;
+    return {
+      rastreio: o?.rastreamento?.codigo || null,
+      servico: o?.servico?.nome || null,
+      idPedido: o?.pedidoVenda?.id ?? null,
+      idNota: o?.notaFiscal?.id ?? null,
+    };
+  } catch (err) {
+    // Volume sem objeto de postagem e situacao normal (remessa nao despachada
+    // por logistica integrada). Nao vale derrubar a sincronizacao por isso.
+    console.warn(`[bling] objeto de postagem ${idVolume}: ${err.message}`);
+    return null;
+  }
+}
