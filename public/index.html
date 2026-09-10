@@ -3,73 +3,148 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Radar Vita Pet Life</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <title>Quadro de Pedidos &middot; Vita Pet Life</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="wrap">
+
     <header class="top">
-      <div>
-        <span class="eyebrow">Vita Pet Life &middot; Opera&ccedil;&atilde;o</span>
-        <h1>Radar Vita Pet Life</h1>
-      </div>
-      <div class="sync-row">
-        <div class="sync" id="syncLine"><span class="dot"></span>Conectando ao painel&hellip;</div>
-        <button class="sync-btn" id="syncBtn" type="button">Sincronizar agora</button>
+      <h1>Quadro de Pedidos <span class="marca">Vita Pet Life</span></h1>
+      <div class="acoes">
+        <span class="sync" id="syncLine">Conectando&hellip;</span>
+        <button class="btn" id="syncBtn" type="button">Sincronizar</button>
+        <button class="btn icone" id="temaBtn" type="button" title="Alternar tema claro/escuro" aria-label="Alternar tema">
+          <span id="temaIcone">&#9789;</span>
+        </button>
+        <button class="btn icone" id="configBtn" type="button" title="Personalizar o quadro" aria-label="Personalizar">&#9881;</button>
       </div>
     </header>
 
-    <div class="summary">
-      <div class="tile total"><div class="n mono" id="cTotal">&ndash;</div><div class="l">pedidos no radar</div></div>
-      <div class="tile green"><div class="n mono" id="cGreen">&ndash;</div><div class="l">tudo certo</div></div>
-      <div class="tile amber"><div class="n mono" id="cAmber">&ndash;</div><div class="l">aviso, sem resolver</div></div>
-      <div class="tile red"><div class="n mono" id="cRed">&ndash;</div><div class="l">algo aconteceu</div></div>
+    <!-- Placar: uma faixa, não quatro cartões. O total é contexto; o que
+         importa é quantos precisam de ação. -->
+    <div class="placar">
+      <div class="stat"><span class="n mono" id="cTotal">&ndash;</span><span class="l">no período</span></div>
+      <div class="stat ok"><span class="n mono" id="cGreen">&ndash;</span><span class="l">seguindo bem</span></div>
+      <div class="stat aviso"><span class="n mono" id="cAmber">&ndash;</span><span class="l">precisam de atenção</span></div>
+      <div class="stat erro"><span class="n mono" id="cRed">&ndash;</span><span class="l">com problema</span></div>
     </div>
 
-    <div class="periodos" id="periodos">
-      <button class="chip" data-periodo="hoje" data-active="true">Hoje</button>
-      <button class="chip" data-periodo="ontem">Ontem</button>
-      <button class="chip" data-periodo="semana">Essa semana</button>
-      <button class="chip" data-periodo="mes">Esse m&ecirc;s</button>
-      <button class="chip" data-periodo="tudo">Tudo</button>
-      <span class="custom">
-        <input type="date" id="dataDe" title="De">
-        <span class="ate">at&eacute;</span>
-        <input type="date" id="dataAte" title="At&eacute;">
-      </span>
-    </div>
-
-    <div class="controls">
-      <div class="filters" id="filters">
-        <button class="chip" data-filter="all" data-active="true">Todos</button>
-        <button class="chip" data-filter="red"><span class="sw" style="background:var(--red)"></span>Vermelho</button>
-        <button class="chip" data-filter="amber"><span class="sw" style="background:var(--amber)"></span>Amarelo</button>
-        <button class="chip" data-filter="green"><span class="sw" style="background:var(--green)"></span>Verde</button>
-        <button class="chip" data-filter="bonificacao">&#127873; Bonifica&ccedil;&atilde;o</button>
+    <div class="controles">
+      <div class="grupo">
+        <span class="rotulo">Período</span>
+        <div class="segmentado" id="periodos">
+          <button class="seg" data-periodo="hoje" data-active="true">Hoje</button>
+          <button class="seg" data-periodo="ontem">Ontem</button>
+          <button class="seg" data-periodo="semana">Semana</button>
+          <button class="seg" data-periodo="mes">Mês</button>
+          <button class="seg" data-periodo="tudo">Tudo</button>
+        </div>
+        <div class="datas">
+          <input type="date" id="dataDe" aria-label="Data inicial">
+          <span class="ate">até</span>
+          <input type="date" id="dataAte" aria-label="Data final">
+        </div>
       </div>
-      <div class="filters" id="brandFilters">
-        <button class="chip" data-brandfilter="all" data-active="true">Todas as marcas</button>
+
+      <div class="grupo">
+        <span class="rotulo">Situação</span>
+        <div class="segmentado" id="filters">
+          <button class="seg" data-filter="all" data-active="true">Todos</button>
+          <button class="seg" data-filter="red"><i class="pt erro"></i>Problema</button>
+          <button class="seg" data-filter="amber"><i class="pt aviso"></i>Atenção</button>
+          <button class="seg" data-filter="green"><i class="pt ok"></i>Bem</button>
+          <button class="seg" data-filter="bonificacao">Bonificação</button>
+        </div>
+
+        <input class="busca" id="search" type="search" placeholder="Buscar pedido, cliente ou rastreio">
       </div>
-      <input class="search" id="search" type="text" placeholder="Buscar pedido ou cliente&hellip;">
+
+      <div class="grupo">
+        <span class="rotulo">Loja</span>
+        <div class="segmentado rolavel" id="brandFilters"></div>
+      </div>
     </div>
 
-    <div class="board">
+    <section class="board" id="board">
+      <div class="board-topo">
+        <span class="board-conta" id="boardConta"></span>
+        <button class="btn icone" id="expandirBtn" type="button" title="Expandir para tela cheia" aria-label="Expandir">&#9974;</button>
+      </div>
       <div class="grid" id="grid"></div>
-      <div class="empty" id="emptyState" hidden></div>
-      <div class="legend">
-        <div class="item"><span class="sw" style="background:var(--green)"></span>Verde &ndash; pedido correto, sem pend&ecirc;ncias</div>
-        <div class="item"><span class="sw" style="background:var(--amber)"></span>Amarelo &ndash; aviso em aberto (ainda n&atilde;o resolvido)</div>
-        <div class="item"><span class="sw" style="background:var(--red)"></span>Vermelho &ndash; problema (ex.: tentativa de entrega falhou)</div>
+      <div class="vazio" id="emptyState" hidden></div>
+      <div class="legenda">
+        <span><i class="pt ok"></i>Seguindo bem</span>
+        <span><i class="pt aviso"></i>Precisa de atenção</span>
+        <span><i class="pt erro"></i>Com problema</span>
+        <span class="tracejado"><i class="pt neutro"></i>Transportadora sem acompanhamento</span>
       </div>
-      <div class="note" id="feedNote"></div>
+    </section>
+  </div>
+
+  <!-- Painel de detalhe do pedido -->
+  <div class="cortina" id="backdrop">
+    <div class="painel" id="panel" role="dialog" aria-label="Detalhe do pedido"></div>
+  </div>
+
+  <!-- Personalização -->
+  <div class="cortina" id="configBackdrop">
+    <div class="painel config" role="dialog" aria-label="Personalizar o quadro">
+      <div class="ph">
+        <h2>Personalizar</h2>
+        <button class="fechar" id="configFechar" aria-label="Fechar">&times;</button>
+      </div>
+
+      <div class="opcao">
+        <label for="optTamanho">Tamanho dos cartões</label>
+        <div class="segmentado" id="optTamanho">
+          <button class="seg" data-tamanho="p">Pequeno</button>
+          <button class="seg" data-tamanho="m" data-active="true">Médio</button>
+          <button class="seg" data-tamanho="g">Grande</button>
+          <button class="seg" data-tamanho="tv">TV</button>
+        </div>
+      </div>
+
+      <div class="opcao">
+        <label for="optForma">Formato</label>
+        <div class="segmentado" id="optForma">
+          <button class="seg" data-forma="arredondado" data-active="true">Arredondado</button>
+          <button class="seg" data-forma="reto">Reto</button>
+          <button class="seg" data-forma="quadrado">Quadrado</button>
+          <button class="seg" data-forma="pilula">Pílula</button>
+          <button class="seg" data-forma="circulo">Círculo</button>
+        </div>
+      </div>
+
+      <div class="opcao">
+        <label>Intensidade da cor</label>
+        <div class="segmentado" id="optCor">
+          <button class="seg" data-cor="suave">Suave</button>
+          <button class="seg" data-cor="media" data-active="true">Média</button>
+          <button class="seg" data-cor="forte">Forte</button>
+        </div>
+      </div>
+
+      <div class="opcao linha">
+        <label for="optRastreio">Mostrar código de rastreio</label>
+        <input type="checkbox" id="optRastreio" checked>
+      </div>
+
+      <div class="opcao linha">
+        <label for="optCliente">Mostrar nome do cliente</label>
+        <input type="checkbox" id="optCliente">
+      </div>
+
+      <p class="dica">As preferências ficam salvas neste navegador. <kbd>Esc</kbd> sai da tela cheia.</p>
+      <button class="btn largo" id="configPadrao" type="button">Restaurar padrão</button>
     </div>
   </div>
 
-  <div class="panel-backdrop" id="backdrop">
-    <div class="panel" id="panel"></div>
-  </div>
+  <button class="sair-tv" id="sairTv" type="button" hidden>Sair da tela cheia <kbd>Esc</kbd></button>
 
   <script src="app.js"></script>
 </body>
