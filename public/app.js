@@ -7,91 +7,160 @@ const state = {
   ate: null,
   search: "",
   selectedId: null,
-  knownBrands: "",
+  marcasConhecidas: "",
 };
-const statusWord = { green: "Tudo certo", amber: "Aviso em aberto", red: "Problema" };
+
+const palavraStatus = { green: "Seguindo bem", amber: "Precisa de atenção", red: "Com problema" };
 const POLL_MS = 60000;
 
-function fmtDate(iso) {
-  if (!iso) return "—";
+// ---------------------------------------------------------------------------
+// Preferências
+// ---------------------------------------------------------------------------
+//
+// Ficam no navegador de quem olha. A TV da operação e o notebook de quem
+// investiga querem coisas diferentes do mesmo quadro: uma quer cartão grande e
+// cor forte a três metros, o outro quer densidade e detalhe.
+const PADRAO = { tema: "auto", tamanho: "m", forma: "arredondado", cor: "media", rastreio: true, cliente: false };
+const CHAVE = "quadro.prefs";
+
+function lerPrefs() {
   try {
-    const d = new Date(iso);
-    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
-  } catch (e) {
+    return { ...PADRAO, ...JSON.parse(localStorage.getItem(CHAVE) || "{}") };
+  } catch {
+    return { ...PADRAO };
+  }
+}
+
+function gravarPrefs(p) {
+  try {
+    localStorage.setItem(CHAVE, JSON.stringify(p));
+  } catch {
+    /* navegador anônimo ou storage bloqueado: valem só nesta sessão */
+  }
+}
+
+let prefs = lerPrefs();
+
+const TAMANHOS = {
+  p: { largura: 104, altura: 46, num: 11.5, cod: 9, gap: 6 },
+  m: { largura: 132, altura: 56, num: 13, cod: 10, gap: 8 },
+  g: { largura: 168, altura: 74, num: 17, cod: 11.5, gap: 10 },
+  tv: { largura: 210, altura: 100, num: 24, cod: 14, gap: 12 },
+};
+
+const FORMAS = {
+  arredondado: { raio: "8px", aspecto: "auto" },
+  reto: { raio: "0", aspecto: "auto" },
+  quadrado: { raio: "8px", aspecto: "1" },
+  pilula: { raio: "999px", aspecto: "auto" },
+  circulo: { raio: "50%", aspecto: "1" },
+};
+
+function aplicarPrefs() {
+  const raiz = document.documentElement;
+
+  // Tema "auto" segue o sistema: sem atributo, o CSS cai no bloco padrão.
+  if (prefs.tema === "auto") raiz.removeAttribute("data-theme");
+  else raiz.setAttribute("data-theme", prefs.tema);
+  document.getElementById("temaIcone").textContent =
+    prefs.tema === "dark" ? "☀" : prefs.tema === "light" ? "☾" : "◐";
+
+  const t = TAMANHOS[prefs.tamanho] || TAMANHOS.m;
+  raiz.style.setProperty("--card-largura", t.largura + "px");
+  raiz.style.setProperty("--card-altura", t.altura + "px");
+  raiz.style.setProperty("--card-num", t.num + "px");
+  raiz.style.setProperty("--card-cod", t.cod + "px");
+  raiz.style.setProperty("--grade-gap", t.gap + "px");
+
+  const f = FORMAS[prefs.forma] || FORMAS.arredondado;
+  raiz.style.setProperty("--card-raio", f.raio);
+  raiz.style.setProperty("--card-aspecto", f.aspecto);
+
+  raiz.setAttribute("data-cor", prefs.cor);
+
+  marcarSegmento("optTamanho", "tamanho", prefs.tamanho);
+  marcarSegmento("optForma", "forma", prefs.forma);
+  marcarSegmento("optCor", "cor", prefs.cor);
+  document.getElementById("optRastreio").checked = prefs.rastreio;
+  document.getElementById("optCliente").checked = prefs.cliente;
+}
+
+function marcarSegmento(idContainer, atributo, valor) {
+  document.querySelectorAll(`#${idContainer} .seg`).forEach((b) => {
+    b.dataset.active = String(b.dataset[atributo] === valor);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Datas e período
+// ---------------------------------------------------------------------------
+function fmtData(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString("pt-BR", {
+      day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
     return iso;
   }
 }
 
 function fmtDia(iso) {
-  // O Bling manda "0000-00-00" quando o campo esta vazio. Sem esta guarda o
-  // painel exibia "00/00/0000", que parece dado e nao e.
-  if (!iso) return "—";
+  // O Bling manda "0000-00-00" quando o campo está vazio. Sem esta guarda a
+  // tela exibia "00/00/0000", que parece dado e não é.
+  if (!iso) return null;
   const d = String(iso).slice(0, 10);
-  if (!/^d{4}-d{2}-d{2}$/.test(d) || d < "2000-01-01") return "—";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d < "2000-01-01") return null;
   return d.split("-").reverse().join("/");
 }
 
-// ---------------------------------------------------------------------------
-// Período
-// ---------------------------------------------------------------------------
-//
-// A data que manda é a do PEDIDO (placedAt), não a do último evento. "Pedidos
-// de hoje" quer dizer feitos hoje — um pedido de semana passada que se mexeu
-// hoje não é de hoje. Quando não há data de pedido, cai no último evento, que
-// é o melhor palpite disponível.
+// A data que manda é a do PEDIDO, não a do último evento: "pedidos de hoje"
+// quer dizer feitos hoje.
 function dataDoPedido(o) {
   return (o.placedAt || o.lastEventAt || "").slice(0, 10);
 }
 
-function hojeISO(deslocamentoDias = 0) {
+function hojeISO(deslocamento = 0) {
   const d = new Date();
-  d.setDate(d.getDate() + deslocamentoDias);
-  // Data local, não UTC: toISOString() joga o fuso do Brasil pro dia anterior
-  // depois das 21h, e o filtro "hoje" ficaria vazio à noite.
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${mm}-${dd}`;
+  d.setDate(d.getDate() + deslocamento);
+  // Data local, não toISOString(): em UTC o fuso do Brasil vira o dia anterior
+  // depois das 21h, e "Hoje" apareceria vazio no fim do expediente.
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function intervaloDoPeriodo() {
+function intervalo() {
   const hoje = hojeISO();
   switch (state.periodo) {
-    case "hoje":
-      return [hoje, hoje];
-    case "ontem": {
-      const o = hojeISO(-1);
-      return [o, o];
-    }
+    case "hoje": return [hoje, hoje];
+    case "ontem": { const o = hojeISO(-1); return [o, o]; }
     case "semana": {
-      const d = new Date();
-      // Semana começa na segunda: getDay() dá 0 no domingo, que precisa voltar 6.
-      const diaDaSemana = (d.getDay() + 6) % 7;
-      return [hojeISO(-diaDaSemana), hoje];
+      // Semana começa na segunda: getDay() dá 0 no domingo, que volta 6 dias.
+      const diaSemana = (new Date().getDay() + 6) % 7;
+      return [hojeISO(-diaSemana), hoje];
     }
-    case "mes":
-      return [hoje.slice(0, 8) + "01", hoje];
-    case "custom":
-      return [state.de || "0000-00-00", state.ate || "9999-99-99"];
-    default:
-      return null; // "tudo"
+    case "mes": return [hoje.slice(0, 8) + "01", hoje];
+    case "custom": return [state.de || "0000-00-00", state.ate || "9999-99-99"];
+    default: return null;
   }
 }
 
 function dentroDoPeriodo(o) {
-  const faixa = intervaloDoPeriodo();
+  const faixa = intervalo();
   if (!faixa) return true;
   const d = dataDoPedido(o);
-  if (!d) return false;
-  return d >= faixa[0] && d <= faixa[1];
+  return d ? d >= faixa[0] && d <= faixa[1] : false;
 }
 
+// ---------------------------------------------------------------------------
+// Grade
+// ---------------------------------------------------------------------------
 function render() {
   const grid = document.getElementById("grid");
-  const empty = document.getElementById("emptyState");
+  const vazio = document.getElementById("emptyState");
 
   const noPeriodo = state.orders.filter(dentroDoPeriodo);
 
-  const list = noPeriodo.filter((o) => {
+  const lista = noPeriodo.filter((o) => {
     if (state.filter === "bonificacao") {
       if (!o.bonificacao) return false;
     } else if (state.filter !== "all" && o.status !== state.filter) {
@@ -100,276 +169,327 @@ function render() {
     if (state.brandFilter !== "all" && o.brand !== state.brandFilter) return false;
     if (state.search) {
       const s = state.search.toLowerCase();
-      const hay = (o.orderNumber + " " + (o.customer || "") + " " + (o.trackingCode || "")).toLowerCase();
-      if (!hay.includes(s)) return false;
+      const alvo = `${o.orderNumber} ${o.customer || ""} ${o.trackingCode || ""} ${o.notaFiscal || ""}`.toLowerCase();
+      if (!alvo.includes(s)) return false;
     }
     return true;
   });
 
   grid.innerHTML = "";
   if (noPeriodo.length === 0) {
-    empty.hidden = false;
-    empty.textContent =
+    vazio.hidden = false;
+    vazio.textContent =
       state.orders.length === 0
-        ? "Nenhum pedido no radar ainda."
-        : "Nenhum pedido neste período. Experimente “Essa semana”, “Esse mês” ou “Tudo”.";
-  } else if (list.length === 0) {
-    empty.hidden = false;
-    empty.textContent = "Nenhum pedido corresponde ao filtro atual.";
+        ? "Nenhum pedido no quadro ainda."
+        : "Nenhum pedido neste período. Tente Semana, Mês ou Tudo.";
+  } else if (lista.length === 0) {
+    vazio.hidden = false;
+    vazio.textContent = "Nenhum pedido corresponde a esses filtros.";
   } else {
-    empty.hidden = true;
-    for (const o of list) {
-      const el = document.createElement("button");
-      el.className = "sq " + o.status + (o.orderNumber === state.selectedId ? " selected" : "");
-      el.title =
-        "Pedido " + o.orderNumber + (o.customer ? " — " + o.customer : "") + (o.trackingCode ? "\nRastreio: " + o.trackingCode : "");
-
-      // textContent em vez de innerHTML: número de pedido e código de rastreio
-      // vêm de fora (webhook, portal, ERP) e não devem poder injetar HTML.
-      const num = document.createElement("span");
-      num.className = "num";
-      num.textContent = o.orderNumber;
-      el.appendChild(num);
-
-      if (o.trackingCode) {
-        const rast = document.createElement("span");
-        rast.className = "rast mono";
-        rast.textContent = o.trackingCode;
-        el.appendChild(rast);
-      }
-      if (o.semAcompanhamento) el.classList.add("sem-acomp");
-      if (o.bonificacao) {
-        const b = document.createElement("span");
-        b.className = "boni";
-        b.textContent = "🎁";
-        b.title = "Bonificação/doação";
-        el.appendChild(b);
-      }
-
-      el.addEventListener("click", () => openPanel(o.orderNumber));
-      grid.appendChild(el);
-    }
+    vazio.hidden = true;
+    for (const o of lista) grid.appendChild(cartao(o));
   }
 
-  const counts = { green: 0, amber: 0, red: 0 };
-  for (const o of noPeriodo) if (counts[o.status] !== undefined) counts[o.status]++;
+  const contas = { green: 0, amber: 0, red: 0 };
+  for (const o of noPeriodo) if (contas[o.status] !== undefined) contas[o.status]++;
   document.getElementById("cTotal").textContent = noPeriodo.length;
-  document.getElementById("cGreen").textContent = counts.green;
-  document.getElementById("cAmber").textContent = counts.amber;
-  document.getElementById("cRed").textContent = counts.red;
+  document.getElementById("cGreen").textContent = contas.green;
+  document.getElementById("cAmber").textContent = contas.amber;
+  document.getElementById("cRed").textContent = contas.red;
 
-  document.querySelectorAll(".chip[data-filter]").forEach((c) => {
-    c.dataset.active = String(c.dataset.filter === state.filter);
-  });
-  document.querySelectorAll(".chip[data-periodo]").forEach((c) => {
-    c.dataset.active = String(c.dataset.periodo === state.periodo);
-  });
+  const conta = document.getElementById("boardConta");
+  if (conta) conta.textContent = lista.length === noPeriodo.length
+    ? `${lista.length} pedido${lista.length === 1 ? "" : "s"}`
+    : `${lista.length} de ${noPeriodo.length} pedidos`;
 
-  // As marcas vêm do que está no período — senão o filtro lista lojas que
-  // não têm nenhum pedido visível.
-  const brandFiltersEl = document.getElementById("brandFilters");
-  const brands = Array.from(new Set(noPeriodo.map((o) => o.brand).filter(Boolean))).sort();
-  const assinatura = brands.join("|");
-  if (assinatura !== state.knownBrands) {
-    state.knownBrands = assinatura;
-    brandFiltersEl.innerHTML = "";
-    const todos = document.createElement("button");
-    todos.className = "chip";
-    todos.dataset.brandfilter = "all";
-    todos.textContent = "Todas as marcas";
-    brandFiltersEl.appendChild(todos);
-    for (const b of brands) {
-      const btn = document.createElement("button");
-      btn.className = "chip";
-      btn.dataset.brandfilter = b;
-      btn.textContent = b;
-      brandFiltersEl.appendChild(btn);
-    }
-  }
-  document.querySelectorAll(".chip[data-brandfilter]").forEach((c) => {
-    c.dataset.active = String(c.dataset.brandfilter === state.brandFilter);
-  });
-
-  const noteEl = document.getElementById("feedNote");
-  noteEl.textContent =
-    "Cor = o pior entre o WMS (FontesLog) e a transportadora (Mandaê). O Bling entra como cadastro e ponte. " +
-    "Clique num quadrado para ver o histórico do pedido.";
+  marcarSegmento("filters", "filter", state.filter);
+  marcarSegmento("periodos", "periodo", state.periodo);
+  montarMarcas(noPeriodo);
 }
 
+function cartao(o) {
+  const el = document.createElement("button");
+  el.className = "sq " + o.status + (o.orderNumber === state.selectedId ? " selected" : "");
+  if (o.semAcompanhamento) el.classList.add("sem-acomp");
+  el.title =
+    `Pedido ${o.orderNumber}` +
+    (o.customer ? ` — ${o.customer}` : "") +
+    (o.trackingCode ? `\nRastreio: ${o.trackingCode}` : "") +
+    (o.notaFiscal ? `\nNota: ${o.notaFiscal}` : "");
+
+  // textContent, nunca innerHTML: número, cliente e rastreio vêm de webhook,
+  // portal e ERP — nenhum deles deveria poder injetar HTML na tela.
+  const num = document.createElement("span");
+  num.className = "num";
+  num.textContent = o.orderNumber;
+  el.appendChild(num);
+
+  if (prefs.rastreio && o.trackingCode) {
+    const r = document.createElement("span");
+    r.className = "rast mono";
+    r.textContent = o.trackingCode;
+    el.appendChild(r);
+  }
+  if (prefs.cliente && o.customer) {
+    const c = document.createElement("span");
+    c.className = "cli";
+    c.textContent = o.customer;
+    el.appendChild(c);
+  }
+  if (o.bonificacao) {
+    const b = document.createElement("span");
+    b.className = "boni";
+    b.textContent = "🎁";
+    b.title = "Bonificação ou doação";
+    el.appendChild(b);
+  }
+
+  el.addEventListener("click", () => abrirPainel(o.orderNumber));
+  return el;
+}
+
+// As lojas vêm do que está no período — senão o filtro oferece loja sem
+// nenhum pedido visível.
+function montarMarcas(noPeriodo) {
+  const alvo = document.getElementById("brandFilters");
+  const marcas = [...new Set(noPeriodo.map((o) => o.brand).filter(Boolean))].sort();
+  const assinatura = marcas.join("|");
+
+  if (assinatura !== state.marcasConhecidas) {
+    state.marcasConhecidas = assinatura;
+    alvo.innerHTML = "";
+    for (const m of ["all", ...marcas]) {
+      const b = document.createElement("button");
+      b.className = "seg";
+      b.dataset.brandfilter = m;
+      b.textContent = m === "all" ? "Todas" : m;
+      alvo.appendChild(b);
+    }
+  }
+  marcarSegmento("brandFilters", "brandfilter", state.brandFilter);
+}
+
+// ---------------------------------------------------------------------------
+// Painel do pedido
+// ---------------------------------------------------------------------------
 function campo(rotulo, valor, mono) {
   const d = document.createElement("div");
-  d.className = "field";
+  d.className = "campo";
   const k = document.createElement("div");
   k.className = "k";
   k.textContent = rotulo;
   const v = document.createElement("div");
   v.className = "v" + (mono ? " mono" : "");
   v.textContent = valor || "—";
-  d.appendChild(k);
-  d.appendChild(v);
+  d.append(k, v);
   return d;
 }
 
-function openPanel(orderNumber) {
-  state.selectedId = orderNumber;
-  const o = state.orders.find((x) => x.orderNumber === orderNumber);
-  const backdrop = document.getElementById("backdrop");
-  const panel = document.getElementById("panel");
-  if (!o) {
-    backdrop.classList.remove("open");
-    return;
-  }
+function etiqueta(texto, extra) {
+  const e = document.createElement("span");
+  e.className = "etiqueta" + (extra ? " " + extra : "");
+  e.textContent = texto;
+  return e;
+}
 
-  // Painel montado por DOM, não por innerHTML: os valores vêm de sistemas
-  // externos e não devem poder injetar HTML na tela de quem abre o quadro.
-  panel.innerHTML = "";
+function abrirPainel(numero) {
+  state.selectedId = numero;
+  const o = state.orders.find((x) => x.orderNumber === numero);
+  const cortina = document.getElementById("backdrop");
+  const painel = document.getElementById("panel");
+  if (!o) return cortina.classList.remove("open");
+
+  painel.innerHTML = "";
 
   const ph = document.createElement("div");
   ph.className = "ph";
   const esq = document.createElement("div");
   const no = document.createElement("div");
   no.className = "order-no mono";
-  no.textContent = "Pedido " + o.orderNumber;
+  no.textContent = o.orderNumber;
   esq.appendChild(no);
-  if (o.brand) {
-    const tag = document.createElement("span");
-    tag.className = "brand-tag";
-    tag.textContent = o.brand;
-    esq.appendChild(tag);
-  }
-  if (o.bonificacao) {
-    const tag = document.createElement("span");
-    tag.className = "brand-tag boni-tag";
-    tag.textContent = "🎁 Bonificação";
-    esq.appendChild(tag);
-  }
+  if (o.brand) esq.appendChild(etiqueta(o.brand));
+  if (o.bonificacao) esq.appendChild(etiqueta("Bonificação", "boni"));
   const fechar = document.createElement("button");
-  fechar.className = "close";
+  fechar.className = "fechar";
   fechar.setAttribute("aria-label", "Fechar");
   fechar.textContent = "×";
-  fechar.addEventListener("click", closePanel);
-  ph.appendChild(esq);
-  ph.appendChild(fechar);
-  panel.appendChild(ph);
+  fechar.addEventListener("click", fecharPainel);
+  ph.append(esq, fechar);
+  painel.appendChild(ph);
 
-  const pill = document.createElement("span");
-  pill.className = "status-pill " + o.status;
-  pill.textContent = statusWord[o.status] || o.status;
-  panel.appendChild(pill);
+  const selo = document.createElement("span");
+  selo.className = "selo " + o.status;
+  selo.textContent = palavraStatus[o.status] || o.status;
+  painel.appendChild(selo);
 
   if (o.motivoStatus) {
     const m = document.createElement("div");
     m.className = "motivo";
-    m.textContent = o.motivoStatus + ". Último evento conhecido: " + (o.carrierStatus || o.wmsStatus || "nenhum") + ".";
-    panel.appendChild(m);
+    m.textContent = o.motivoStatus + ".";
+    painel.appendChild(m);
   }
-
   if (o.semAcompanhamento) {
     const n = document.createElement("div");
     n.className = "motivo neutro";
     n.textContent =
-      "Despachado por transportadora que o quadro nao consulta (so a Mandaê tem integração). " +
-      "Sabemos que saiu; não haverá mais eventos por aqui.";
-    panel.appendChild(n);
+      "Saiu por transportadora que o quadro não consulta — só a Mandaê tem integração. Não virão mais eventos por aqui.";
+    painel.appendChild(n);
   }
 
-  panel.appendChild(campo("Cliente", o.customer));
-  panel.appendChild(campo("Status FontesLog (WMS)", o.wmsStatus || "sem dado ainda"));
-  panel.appendChild(campo("Último evento Mandaê", o.carrierStatus || "sem dado ainda"));
-  panel.appendChild(campo("Nota fiscal", o.notaFiscal, true));
-  panel.appendChild(campo("Código de rastreio", o.trackingCode, true));
-  panel.appendChild(campo("Destino", o.city));
-  panel.appendChild(campo("Natureza da operação", o.natureza));
-  panel.appendChild(campo("Pedido feito em", fmtDate(o.placedAt), true));
-  panel.appendChild(campo("Coleta prevista", o.coletaPrevista ? fmtDate(o.coletaPrevista) : null, true));
-  // Rotulo honesto: essa data e o prazo pra EMITIR A NOTA, nunca previsao de
-  // entrega. Chama-la de "previsao de entrega" fazia a tela mentir.
-  panel.appendChild(campo("Prazo para emitir a nota", o.previsaoEntrega ? fmtDia(o.previsaoEntrega) : null, true));
-  panel.appendChild(campo("Última atualização", fmtDate(o.lastEventAt), true));
-  panel.appendChild(campo("Dias úteis sem novidade", o.diasParados ?? "—", true));
+  painel.append(
+    campo("Cliente", o.customer),
+    campo("Destino", o.city),
+    campo("Status no WMS", o.wmsStatus || "sem dado ainda"),
+    campo("Último evento da transportadora", o.carrierStatus || "sem dado ainda"),
+    campo("Nota fiscal", o.notaFiscal, true),
+    campo("Código de rastreio", o.trackingCode, true),
+    campo("Natureza da operação", o.natureza),
+    campo("Pedido feito em", fmtData(o.placedAt), true),
+    campo("Coleta prevista", fmtData(o.coletaPrevista), true),
+    campo("Prazo para emitir a nota", fmtDia(o.previsaoEntrega), true),
+    campo("Última atualização", fmtData(o.lastEventAt), true),
+    campo("Dias úteis sem novidade", o.diasParados ?? "—", true)
+  );
 
-  backdrop.classList.add("open");
+  cortina.classList.add("open");
   render();
 }
 
-function closePanel() {
+function fecharPainel() {
   state.selectedId = null;
   document.getElementById("backdrop").classList.remove("open");
   render();
 }
 
+// ---------------------------------------------------------------------------
+// Tela cheia
+// ---------------------------------------------------------------------------
+function entrarTv() {
+  document.body.classList.add("tv");
+  document.getElementById("sairTv").hidden = false;
+  document.documentElement.requestFullscreen?.().catch(() => {
+    /* sem permissão de tela cheia: o modo do quadro funciona igual */
+  });
+}
+
+function sairTv() {
+  document.body.classList.remove("tv");
+  document.getElementById("sairTv").hidden = true;
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Eventos
+// ---------------------------------------------------------------------------
+function abrirConfig() { document.getElementById("configBackdrop").classList.add("open"); }
+function fecharConfig() { document.getElementById("configBackdrop").classList.remove("open"); }
+
+function segmento(idContainer, atributo, aoEscolher) {
+  document.getElementById(idContainer).addEventListener("click", (e) => {
+    const btn = e.target.closest(".seg");
+    if (!btn || !btn.dataset[atributo]) return;
+    aoEscolher(btn.dataset[atributo]);
+  });
+}
+
+segmento("periodos", "periodo", (v) => { state.periodo = v; render(); });
+segmento("filters", "filter", (v) => { state.filter = v; render(); });
+segmento("brandFilters", "brandfilter", (v) => { state.brandFilter = v; render(); });
+segmento("optTamanho", "tamanho", (v) => { prefs.tamanho = v; gravarPrefs(prefs); aplicarPrefs(); });
+segmento("optForma", "forma", (v) => { prefs.forma = v; gravarPrefs(prefs); aplicarPrefs(); });
+segmento("optCor", "cor", (v) => { prefs.cor = v; gravarPrefs(prefs); aplicarPrefs(); });
+
 document.getElementById("backdrop").addEventListener("click", (e) => {
-  if (e.target.id === "backdrop") closePanel();
+  if (e.target.id === "backdrop") fecharPainel();
 });
-document.getElementById("filters").addEventListener("click", (e) => {
-  const btn = e.target.closest(".chip[data-filter]");
-  if (!btn) return;
-  state.filter = btn.dataset.filter;
-  render();
+document.getElementById("configBackdrop").addEventListener("click", (e) => {
+  if (e.target.id === "configBackdrop") fecharConfig();
 });
-document.getElementById("brandFilters").addEventListener("click", (e) => {
-  const btn = e.target.closest(".chip[data-brandfilter]");
-  if (!btn) return;
-  state.brandFilter = btn.dataset.brandfilter;
-  render();
-});
-document.getElementById("periodos").addEventListener("click", (e) => {
-  const btn = e.target.closest(".chip[data-periodo]");
-  if (!btn) return;
-  state.periodo = btn.dataset.periodo;
-  render();
-});
+
 ["dataDe", "dataAte"].forEach((id) => {
   document.getElementById(id).addEventListener("change", () => {
     state.de = document.getElementById("dataDe").value || null;
     state.ate = document.getElementById("dataAte").value || null;
-    // Mexer nas datas já significa querer o período personalizado.
     if (state.de || state.ate) state.periodo = "custom";
     render();
   });
 });
+
 document.getElementById("search").addEventListener("input", (e) => {
   state.search = e.target.value;
   render();
 });
 
-render();
+document.getElementById("temaBtn").addEventListener("click", () => {
+  // auto → claro → escuro → auto
+  prefs.tema = prefs.tema === "auto" ? "light" : prefs.tema === "light" ? "dark" : "auto";
+  gravarPrefs(prefs);
+  aplicarPrefs();
+});
 
+document.getElementById("configBtn").addEventListener("click", abrirConfig);
+document.getElementById("configFechar").addEventListener("click", fecharConfig);
+
+document.getElementById("optRastreio").addEventListener("change", (e) => {
+  prefs.rastreio = e.target.checked; gravarPrefs(prefs); render();
+});
+document.getElementById("optCliente").addEventListener("change", (e) => {
+  prefs.cliente = e.target.checked; gravarPrefs(prefs); render();
+});
+document.getElementById("configPadrao").addEventListener("click", () => {
+  prefs = { ...PADRAO };
+  gravarPrefs(prefs);
+  aplicarPrefs();
+  render();
+});
+
+document.getElementById("expandirBtn").addEventListener("click", entrarTv);
+document.getElementById("sairTv").addEventListener("click", sairTv);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (document.body.classList.contains("tv")) return sairTv();
+  fecharConfig();
+  fecharPainel();
+});
+
+// ---------------------------------------------------------------------------
+// Dados
+// ---------------------------------------------------------------------------
 async function poll() {
-  const syncLine = document.getElementById("syncLine");
+  const linha = document.getElementById("syncLine");
   try {
-    const [ordersRes, metaRes] = await Promise.all([fetch("/api/orders"), fetch("/api/meta")]);
-    const ordersData = await ordersRes.json();
-    const metaData = await metaRes.json();
-    state.orders = ordersData.orders || [];
+    const [pedidos, meta] = await Promise.all([fetch("/api/orders"), fetch("/api/meta")]);
+    state.orders = (await pedidos.json()).orders || [];
+    const { lastSyncAt } = await meta.json();
     render();
-    if (state.selectedId) openPanel(state.selectedId);
-    syncLine.textContent = metaData.lastSyncAt
-      ? "Última sincronização: " + fmtDate(metaData.lastSyncAt)
-      : "Aguardando primeira sincronização";
-  } catch (err) {
-    syncLine.textContent = "Não foi possível falar com o servidor agora.";
+    if (state.selectedId) abrirPainel(state.selectedId);
+    linha.textContent = lastSyncAt ? `Sincronizado ${fmtData(lastSyncAt)}` : "Aguardando primeira sincronização";
+  } catch {
+    linha.textContent = "Sem conexão com o servidor";
   }
 }
 
-poll();
-setInterval(poll, POLL_MS);
-
-document.getElementById("syncBtn").addEventListener("click", async () => {
-  const btn = document.getElementById("syncBtn");
-  const syncLine = document.getElementById("syncLine");
+document.getElementById("syncBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const linha = document.getElementById("syncLine");
   btn.disabled = true;
-  const originalLabel = btn.textContent;
+  const rotulo = btn.textContent;
   btn.textContent = "Sincronizando…";
   try {
     const res = await fetch("/api/sync", { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "falha ao sincronizar");
+    const dados = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(dados.error || "não deu para sincronizar");
     await poll();
   } catch (err) {
-    syncLine.textContent = "Não deu pra sincronizar agora: " + err.message;
+    linha.textContent = "Não deu para sincronizar: " + err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = originalLabel;
+    btn.textContent = rotulo;
   }
 });
+
+aplicarPrefs();
+render();
+poll();
+setInterval(poll, POLL_MS);
