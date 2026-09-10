@@ -220,7 +220,9 @@ function render() {
     if (state.brandFilter !== "all" && o.brand !== state.brandFilter) return false;
     if (state.search) {
       const s = state.search.toLowerCase();
-      const alvo = `${o.orderNumber} ${o.customer || ""} ${o.trackingCode || ""} ${o.notaFiscal || ""}`.toLowerCase();
+      // Os apelidos entram na busca: quem vem do portal da FontesLog tem na
+      // mao "ATB0240367", que agora e apelido do quadrado da nota.
+      const alvo = `${o.orderNumber} ${o.customer || ""} ${o.trackingCode || ""} ${o.notaFiscal || ""} ${(o.apelidos || []).join(" ")}`.toLowerCase();
       if (!alvo.includes(s)) return false;
     }
     return true;
@@ -266,7 +268,8 @@ function cartao(o) {
     `Pedido ${o.orderNumber}` +
     (o.customer ? ` — ${o.customer}` : "") +
     (o.trackingCode ? `\nRastreio: ${o.trackingCode}` : "") +
-    (o.notaFiscal ? `\nNota: ${o.notaFiscal}` : "");
+    (o.notaFiscal ? `\nNota: ${o.notaFiscal}` : "") +
+    ((o.apelidos || []).length ? `\nTambém: ${o.apelidos.join(", ")}` : "");
 
   // textContent, nunca innerHTML: número, cliente e rastreio vêm de webhook,
   // portal e ERP — nenhum deles deveria poder injetar HTML na tela.
@@ -396,6 +399,7 @@ function abrirPainel(numero) {
     campo("Status no WMS", o.wmsStatus || "sem dado ainda"),
     campo("Último evento da transportadora", o.carrierStatus || "sem dado ainda"),
     campo("Nota fiscal", o.notaFiscal, true),
+    campo("Tambem conhecido como", (o.apelidos || []).join(", "), true),
     campo("Código de rastreio", o.trackingCode, true),
     campo("Natureza da operação", o.natureza),
     campo("Pedido feito em", fmtData(o.placedAt), true),
