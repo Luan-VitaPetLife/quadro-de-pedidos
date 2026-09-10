@@ -29,7 +29,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
   console.log(`[bling] ${lista.length} pedido(s) na listagem.`);
 
-  const resumo = { lidos: lista.length, comRastreio: 0, mesclados: 0, atualizados: 0, ignorados: 0, removidos: 0, erros: 0 };
+  const resumo = { lidos: lista.length, comRastreio: 0, mesclados: 0, atualizados: 0, ignorados: 0, criados: 0, removidos: 0, erros: 0 };
 
   for (const resumido of lista) {
     try {
@@ -60,10 +60,24 @@ export async function runSyncBling({ dias = 30 } = {}) {
       // Quem decide que um pedido merece um quadrado sao o WMS e a
       // transportadora, que e onde a operacao acontece. O Bling entra depois,
       // pra dizer de quem e o pedido e pra juntar o que estava separado.
-      if (!getOrder(canonico)) {
+      // ...MAS um pedido DESPACHADO merece quadrado, mesmo que nem o WMS nem a
+      // transportadora tenham falado dele ainda.
+      //
+      // Caso que obrigou essa regra: o pedido 933 saiu em 23/07 com rastreio
+      // VITPT000002 e simplesmente nao existia no quadro. Nada no sistema
+      // conseguia DESCOBRI-LO: o webhook da Mandae so avisa do que acontece
+      // dali pra frente, a leitura do WMS cobre 30 dias, e o Bling (ate aqui)
+      // nao criava nada. Pedido despachado que some do radar e exatamente o que
+      // este quadro existe pra impedir.
+      //
+      // Ter codigo de rastreio e a prova de que saiu. Sem rastreio, o pedido
+      // ainda nao virou entrega -- esse continua de fora.
+      const jaExiste = !!getOrder(canonico);
+      if (!jaExiste && !dados.trackingCode) {
         resumo.ignorados++;
         continue;
       }
+      if (!jaExiste) resumo.criados++;
 
       upsertOrder({
         orderNumber: canonico,
@@ -86,7 +100,8 @@ export async function runSyncBling({ dias = 30 } = {}) {
   setMeta("lastBlingSyncAt", new Date().toISOString());
   console.log(
     `[bling] concluido: ${resumo.atualizados} enriquecido(s), ${resumo.comRastreio} com rastreio, ` +
-      `${resumo.mesclados} duplicado(s) mesclado(s), ${resumo.ignorados} sem quadrado (ignorado), ` +
+      `${resumo.mesclados} duplicado(s) mesclado(s), ${resumo.criados} novo(s) no radar, ` +
+      `${resumo.ignorados} sem rastreio (ignorado), ` +
       `${resumo.removidos} sem status removido(s), ${resumo.erros} erro(s).`
   );
   return resumo;
@@ -106,7 +121,10 @@ export async function runSyncBling({ dias = 30 } = {}) {
  * verdade.
  */
 export function limparPedidosSemStatus() {
-  const semStatus = listOrders().filter((o) => !o.wmsStatus && !o.carrierStatus);
+  // Nao apaga quem tem codigo de rastreio: esse pedido SAIU, e o status da
+  // transportadora chega no proximo ciclo. Sem esta guarda, a limpeza
+  // desfaria na mesma rodada a descoberta que o Bling acabou de fazer.
+  const semStatus = listOrders().filter((o) => !o.wmsStatus && !o.carrierStatus && !o.trackingCode);
   for (const o of semStatus) apagarPedido(o.orderNumber);
   return semStatus.length;
 }

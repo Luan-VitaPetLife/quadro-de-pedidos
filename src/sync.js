@@ -20,6 +20,14 @@ import { upsertOrder, listOrders, setMeta } from "./lib/db.js";
 async function reconcileOneOrder(order) {
   if (!order.trackingCode) return;
 
+  // So consulta a Mandae para rastreios DELA. A operacao usa varias
+  // transportadoras -- Mercado Envios manda "MEL479...", Shopee manda
+  // "PPNGG6JL...", e perguntar por esses codigos so gera 404 e gasta chamada.
+  // O prefixo vem do painel da Mandae (Configuracoes -> API -> Prefixo
+  // Rastreamento) e e configuravel porque um dia pode mudar.
+  const prefixo = process.env.MANDAE_PREFIXO_RASTREIO || "VITPT";
+  if (!String(order.trackingCode).toUpperCase().startsWith(prefixo.toUpperCase())) return;
+
   try {
     const tracking = await fetchTracking(order.trackingCode);
     const event = latestEvent(tracking);
