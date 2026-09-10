@@ -30,7 +30,8 @@ export async function handleInvestigar(req, res) {
     String(t || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 
   try {
-    const { listarPedidos, detalhePedido, extrairDoPedido } = await import("../integrations/bling.js");
+    const bling = await import("../integrations/bling.js");
+    const { listarPedidos, detalhePedido, extrairDoPedido, listarNotas, detalheNota, naturezasDeOperacao, ehNaturezaDeBonificacao } = bling;
     const { fetchTracking, latestEvent } = await import("../integrations/mandae.js");
     const { mapMandaeEvent } = await import("../lib/statusMapping.js");
 
@@ -96,6 +97,47 @@ export async function handleInvestigar(req, res) {
       });
     }
 
+
+    // ---- o que as NOTAS FISCAIS dizem ----
+    //
+    // Olhar nota, e nao so pedido de venda, foi o que destravou o caso da
+    // Raquel Faria: ela tem 3 NOTAS e apenas 1 pedido de venda. Saida de
+    // doacao/bonificacao costuma nascer direto como nota, sem pedido -- e quem
+    // le so pedido nunca enxerga essas remessas.
+    const naturezas = await naturezasDeOperacao();
+    const notas = await listarNotas({ dataDe: inicio, dataAte: hoje });
+
+    const notasCandidatas = notas.filter((n) => {
+      if (pedido) return String(n.numero) === pedido;
+      return normalizar(n?.contato?.nome).includes(normalizar(cliente));
+    });
+
+    const notasAchadas = [];
+    for (const n of notasCandidatas.slice(0, 25)) {
+      let detalhe = null;
+      try {
+        detalhe = await detalheNota(n.id);
+      } catch {
+        /* segue com o resumo da listagem */
+      }
+      const idNatureza = detalhe?.naturezaOperacao?.id ?? n?.naturezaOperacao?.id;
+      const nomeNatureza = naturezas[String(idNatureza)] || null;
+      const numeroNota = String(n.numero ?? detalhe?.numero ?? "");
+
+      notasAchadas.push({
+        numero: numeroNota,
+        emissao: n.dataEmissao ?? detalhe?.dataEmissao ?? null,
+        valor: n.valorNota ?? detalhe?.valorNota ?? null,
+        situacao: n.situacao ?? detalhe?.situacao ?? null,
+        cliente: n?.contato?.nome ?? detalhe?.contato?.nome ?? null,
+        natureza: nomeNatureza,
+        ehBonificacao: ehNaturezaDeBonificacao(nomeNatureza),
+        // A Mandae recebe o numero da nota como referencia do parceiro em
+        // varios casos -- e por isso que o quadro tem quadrados "000222".
+        estaNoQuadroPeloNumeroDaNota: !!getOrder(numeroNota),
+      });
+    }
+
     res.json({
       procurado: pedido ? { pedido } : { cliente },
       janelaDias: dias,
@@ -108,10 +150,13 @@ export async function handleInvestigar(req, res) {
         cliente: o.customer,
       })),
       noBling: achados,
+      notasFiscais: notasAchadas,
       resumo: {
         pedidosNoBling: candidatos.length,
         pedidosNoQuadro: noQuadro.length,
         faltandoNoQuadro: achados.filter((a) => a.diagnostico.startsWith("FALTA")).length,
+        notasEncontradas: notasCandidatas.length,
+        notasForaDoQuadro: notasAchadas.filter((n) => !n.estaNoQuadroPeloNumeroDaNota).length,
       },
     });
   } catch (err) {

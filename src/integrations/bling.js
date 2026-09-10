@@ -192,14 +192,37 @@ export async function listarPedidos({ dataDe, dataAte, maxPaginas = 50 } = {}) {
 // vida toda do processo.
 const nomesDeLoja = new Map();
 
+// O `loja.id` do pedido e o id de um CANAL DE VENDA -- cada integracao de
+// marketplace ou loja virtual vira um canal no Bling. O endpoint e
+// /canais-venda; /lojas/{id} nao existe, e por isso a primeira tentativa
+// falhava em silencio e o quadro seguia mostrando "Loja 205761639".
+// (Endpoint confirmado no projeto dashboard, que ja fazia essa traducao.)
+let canaisCarregados = false;
+
+async function carregarCanais() {
+  if (canaisCarregados) return;
+  canaisCarregados = true; // marca antes: falhar nao deve virar tentativa a cada pedido
+  try {
+    const dados = await blingFetch("/canais-venda", { limite: 100, pagina: 1 });
+    for (const c of dados?.data || []) {
+      const nome = c.descricao || c.nome || c.tipo;
+      if (c.id != null && nome) nomesDeLoja.set(String(c.id), nome);
+    }
+    console.log(`[bling] ${nomesDeLoja.size} canal(is) de venda carregado(s).`);
+  } catch (err) {
+    console.warn(`[bling] nao consegui listar os canais de venda: ${err.message}`);
+  }
+}
+
 export async function nomeDaLoja(id) {
   if (id == null) return null;
   const chave = String(id);
+  await carregarCanais();
   if (nomesDeLoja.has(chave)) return nomesDeLoja.get(chave);
 
   let nome = null;
   try {
-    const dados = await blingFetch(`/lojas/${encodeURIComponent(chave)}`);
+    const dados = await blingFetch(`/canais-venda/${encodeURIComponent(chave)}`);
     nome = dados?.data?.nome || dados?.data?.descricao || null;
   } catch (err) {
     // Se o endpoint nao existir ou o escopo nao cobrir, seguimos com o id.
@@ -243,4 +266,81 @@ export function extrairDoPedido(pedido) {
     uf: pedido?.transporte?.etiqueta?.uf || null,
     data: pedido?.data || null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Notas fiscais
+// ---------------------------------------------------------------------------
+//
+// Por que o quadro precisa olhar NOTA e nao so PEDIDO DE VENDA:
+//
+// 1. A Mandae recebe, como referencia do parceiro, o NUMERO DA NOTA em varios
+//    casos -- e por isso que o quadro tinha quadrados chamados "000222" e
+//    "000218". Sem ler a nota, nao da pra ligar esses ao pedido.
+//
+// 2. Existe saida que nasce como NOTA, sem pedido de venda nenhum -- doacao e
+//    bonificacao costumam ser assim. Quem le so pedido de venda nunca enxerga
+//    essas remessas, e elas somem do radar mesmo tendo sido despachadas.
+//
+// 3. A NATUREZA DE OPERACAO (o que diz se e bonificacao) e campo de NOTA, nao
+//    de pedido.
+
+export async function listarNotas({ dataDe, dataAte, maxPaginas = 50 } = {}) {
+  const paraISO = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+  const todas = [];
+
+  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
+    const dados = await blingFetch("/nfe", {
+      pagina,
+      limite: 100,
+      dataEmissaoInicial: paraISO(dataDe),
+      dataEmissaoFinal: paraISO(dataAte),
+    });
+    const lote = dados?.data || [];
+    todas.push(...lote);
+    if (lote.length < 100) break;
+  }
+  return todas;
+}
+
+export async function detalheNota(id) {
+  const dados = await blingFetch(`/nfe/${encodeURIComponent(id)}`);
+  return dados?.data || null;
+}
+
+// Nome de cada natureza de operacao, por id.
+//
+// A comparacao e pelo NOME e nao pelo id numerico: id e identificador interno
+// da conta, e prende-lo no codigo quebraria em silencio se a natureza fosse
+// recriada. (Mesma decisao tomada no projeto dashboard.)
+let naturezasCache = null;
+
+export async function naturezasDeOperacao() {
+  if (naturezasCache) return naturezasCache;
+  const mapa = {};
+  try {
+    const dados = await blingFetch("/naturezas-operacoes", { limite: 100, pagina: 1 });
+    for (const n of dados?.data || []) mapa[String(n.id)] = n.descricao || n.nome || "";
+  } catch (err) {
+    console.warn(`[bling] nao consegui listar as naturezas de operacao: ${err.message}`);
+  }
+  naturezasCache = mapa;
+  return mapa;
+}
+
+/**
+ * Decide se a natureza e de BONIFICACAO/DOACAO (saida sem receita).
+ *
+ * "saida" E "bonificac", nao so "bonificac": a conta tem as duas naturezas,
+ * "Saida em bonificacao" e "Entrada de bonificacao". Casar so por "bonifica"
+ * contaria mercadoria ENTRANDO como se tivesse sido doada -- o numero
+ * exatamente ao contrario. (Regra herdada do projeto dashboard.)
+ */
+export function ehNaturezaDeBonificacao(nome) {
+  const n = String(nome || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+  return /\bsaida\b/.test(n) && /bonificac/.test(n);
 }
