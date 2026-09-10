@@ -76,10 +76,8 @@ async function main() {
   let parados = [];
   let rejeitados = [];
   try {
-    [parados, rejeitados] = await Promise.all([
-      buscarPedidosParados({ dataDe: inicio, dataAte: hoje }),
-      buscarPedidosRejeitados({ dataDe: inicio, dataAte: hoje }),
-    ]);
+    parados = await buscarPedidosParados({ dataDe: inicio, dataAte: hoje });
+    rejeitados = await buscarPedidosRejeitados({ dataDe: inicio, dataAte: hoje });
   } catch (err) {
     if (err.message === "SESSAO_EXPIRADA") throw err;
     console.log(`  (aviso: nao consegui ler as telas de parados/rejeitados: ${err.message})`);
