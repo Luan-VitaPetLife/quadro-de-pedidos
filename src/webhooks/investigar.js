@@ -83,6 +83,11 @@ export async function handleInvestigar(req, res) {
         cliente: dados?.cliente ?? null,
         transportadora: detalhe?.transporte?.contato?.nome ?? null,
         rastreio,
+        // Sonda decisiva: o pedido conhece a NOTA dele? E com que formato de
+        // numero? A mesclagem depende disso pra unir o quadrado do pedido ao
+        // que a nota (ou a Mandae, que usa o numero da NF) criou.
+        notaFiscalDoPedido: detalhe?.notaFiscal ?? null,
+        volumesDoPedido: detalhe?.transporte?.volumes ?? null,
         mandae,
         estaNoQuadro: !!noQuadroEste,
         // O diagnostico que interessa: se a Mandae sabe de um problema e o
