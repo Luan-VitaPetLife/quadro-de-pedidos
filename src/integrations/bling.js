@@ -323,6 +323,10 @@ export async function naturezasDeOperacao() {
     for (const n of dados?.data || []) mapa[String(n.id)] = n.descricao || n.nome || "";
   } catch (err) {
     console.warn(`[bling] nao consegui listar as naturezas de operacao: ${err.message}`);
+    // NAO cacheia o fracasso: uma falha passageira (token renovando, rate
+    // limit, servidor ocupado) congelaria o mapa vazio ate o proximo deploy, e
+    // toda sincronizacao seguinte gravaria "sem natureza" achando que sabia.
+    return mapa;
   }
   naturezasCache = mapa;
   return mapa;
@@ -351,7 +355,12 @@ export async function situacoesDeVenda() {
     for (const s of dados?.data || []) mapa[String(s.id)] = s.nome || "";
   } catch (err) {
     console.warn(`[bling] nao consegui listar as situacoes de venda: ${err.message}`);
+    return mapa; // mesma razao: fracasso nao vira verdade permanente
   }
+  // Resposta vazia tambem nao se cacheia: sem as situacoes, todo pedido seria
+  // gravado como "situacao desconhecida" e o cancelamento voltaria a passar
+  // despercebido -- que e exatamente o defeito que esta funcao veio corrigir.
+  if (!Object.keys(mapa).length) return mapa;
   situacoesCache = mapa;
   return mapa;
 }
