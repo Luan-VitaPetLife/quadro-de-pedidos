@@ -403,9 +403,28 @@ export function upsertOrder(partial) {
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
     notaFiscal: partial.notaFiscal ?? existing.notaFiscal ?? null,
     coletaPrevista: partial.coletaPrevista !== undefined ? partial.coletaPrevista : existing.coletaPrevista ?? null,
-    apelidos: [...new Set([...(existing.apelidos || []), ...(partial.apelidos || []), ...(apelidoNovo ? [apelidoNovo] : [])])].join(",") || null,
+    // O codigo recusado acima nao se perde: vira apelido, entao quem tiver ele
+    // na mao ainda acha o pedido.
+    apelidos: [...new Set([
+      ...(existing.apelidos || []),
+      ...(partial.apelidos || []),
+      ...(apelidoNovo ? [apelidoNovo] : []),
+      ...(partial.trackingCode && existing.trackingCode && partial.trackingCode !== existing.trackingCode
+        ? [partial.trackingCode]
+        : []),
+    ])].join(",") || null,
     temNota: partial.temNota !== undefined ? (partial.temNota ? 1 : 0) : (existing.temNota ? 1 : 0),
-    trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
+    // Codigo de rastreio JA EXISTENTE nao e trocado por outro numa gravacao
+    // de rotina -- so preenchido quando nao havia nenhum.
+    //
+    // O caso que ensinou: o pedido 1453 tinha "MEL47975051107FMDOF01", codigo
+    // do Mercado Envios, e uma sincronizacao do Bling o substituiu por
+    // "4Y4A5GUKFRJKPO4K3YGNYQNSZY", que e identificador interno do Mercado
+    // Livre e nao rastreia nada. Trocar etiqueta e evento raro e deliberado;
+    // integracao gravando identificador por cima de codigo bom e corriqueiro.
+    // Na duvida, o quadro fica com o que ja tinha e o pente fino reporta a
+    // divergencia pra alguem olhar.
+    trackingCode: existing.trackingCode ?? partial.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
     placedAt: partial.placedAt ?? existing.placedAt ?? null,
     lastEventAt: partial.lastEventAt ?? existing.lastEventAt ?? new Date().toISOString(),

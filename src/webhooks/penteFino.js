@@ -14,46 +14,9 @@
 //   GET /api/pente-fino?s=<segredo>&dias=60&corrigir=1
 //   GET /api/pente-fino?s=<segredo>&limiteMandae=80
 
-import { listOrders, upsertOrder, mesclarEmCanonico, chaveNota, getOrder, resolverCanonico } from "../lib/db.js";
+import { listOrders, upsertOrder, getOrder, resolverCanonico } from "../lib/db.js";
 import { verifyMandaeWebhook } from "./mandae.js";
-
-/** Agrupa por uma chave e devolve so os grupos com mais de um ocupante. */
-function repetidos(pedidos, chaveDe) {
-  const grupos = new Map();
-  for (const o of pedidos) {
-    const k = chaveDe(o);
-    if (!k) continue;
-    if (!grupos.has(k)) grupos.set(k, []);
-    grupos.get(k).push(o);
-  }
-  return [...grupos.entries()].filter(([, lista]) => lista.length > 1);
-}
-
-// Qual dos nomes fica com o quadrado.
-//
-// Nem todo numero identifica igual. Por ordem de quem a operacao reconhece:
-//
-//   1141          numero do pedido no Bling -- e o que a pessoa digita e procura
-//   000218        numero da nota fiscal -- identifica, mas e o segundo nome
-//   ATB0240367    numero interno do WMS -- so existe dentro do portal da FontesLog
-//   VITPT000375   o proprio codigo de rastreio virou nome, porque a Mandae
-//                 avisou de um envio que o quadro ainda nao conhecia
-//
-// Escolher errado nao perde dado (o perdedor vira apelido), mas troca o nome
-// que aparece no quadrado -- e um quadrado chamado "VITPT000375" nao ajuda
-// ninguem a achar o pedido.
-function forcaDoNome(numero) {
-  const n = String(numero);
-  const prefixo = (process.env.MANDAE_PREFIXO_RASTREIO || "VITPT").toUpperCase();
-  if (n.toUpperCase().startsWith(prefixo)) return 3;
-  if (/^ATB/i.test(n)) return 2;
-  if (/^0\d/.test(n)) return 1; // zeros a esquerda: cara de nota fiscal
-  return 0;
-}
-
-function escolherCanonico(lista) {
-  return [...lista].sort((a, b) => forcaDoNome(a.orderNumber) - forcaDoNome(b.orderNumber))[0];
-}
+import { deduplicar } from "../lib/deduplicar.js";
 
 export async function handlePenteFino(req, res) {
   if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
@@ -78,25 +41,11 @@ export async function handlePenteFino(req, res) {
   // -------------------------------------------------------------------
   // 1. Duplicata dentro do proprio quadro -- nao custa chamada nenhuma.
   // -------------------------------------------------------------------
-  // Duas remessas nunca compartilham nota nem codigo de rastreio. Se dois
-  // quadrados compartilham, sao o mesmo pedido entrando por portas diferentes.
-  for (const [chave, lista] of repetidos(quadro, (o) => chaveNota(o.notaFiscal))) {
-    achados.duplicataPorNota.push({ nota: chave, pedidos: lista.map((o) => o.orderNumber) });
-    if (corrigir) {
-      const canonico = escolherCanonico(lista);
-      const outros = lista.filter((o) => o.orderNumber !== canonico.orderNumber).map((o) => o.orderNumber);
-      corrigidos.mesclados += mesclarEmCanonico(canonico.orderNumber, outros).mesclados;
-    }
-  }
-
-  for (const [chave, lista] of repetidos(quadro, (o) => o.trackingCode)) {
-    achados.duplicataPorRastreio.push({ rastreio: chave, pedidos: lista.map((o) => o.orderNumber) });
-    if (corrigir) {
-      const canonico = escolherCanonico(lista);
-      const outros = lista.filter((o) => o.orderNumber !== canonico.orderNumber).map((o) => o.orderNumber);
-      corrigidos.mesclados += mesclarEmCanonico(canonico.orderNumber, outros).mesclados;
-    }
-  }
+  // A mesma rotina que o agendador roda a cada ciclo (src/lib/deduplicar.js).
+  const dedup = deduplicar({ aplicar: corrigir });
+  achados.duplicataPorNota = dedup.porNota;
+  achados.duplicataPorRastreio = dedup.porRastreio;
+  corrigidos.mesclados += dedup.mesclados;
 
   // Quadrado que nenhuma fonte sustenta. Nao apagamos aqui -- so mostramos,
   // porque limpeza automatica ja fez pedido sumir do quadro antes.
