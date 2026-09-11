@@ -238,6 +238,45 @@ const upsertStmt = db.prepare(`
     updated_at = excluded.updated_at
 `);
 
+// ---------------------------------------------------------------------------
+// Apelido resolvido na ESCRITA
+// ---------------------------------------------------------------------------
+//
+// Mesclar nao basta. O WMS continua listando a remessa pelo numero dele
+// ("ATB0240367"), entao a proxima leitura do portal recriava o quadrado que o
+// Bling tinha acabado de unir -- um ciclo sem fim: o Bling une, o WMS recria.
+//
+// Se ja foi estabelecido que ATB0240367 E o pedido 000258, entao qualquer
+// escrita sobre ATB0240367 e uma escrita sobre 000258. Resolver aqui, no unico
+// ponto por onde toda gravacao passa, vale para o WMS, para os webhooks da
+// Mandae e para o que vier depois.
+let cacheApelidos = null;
+
+function mapaDeApelidos() {
+  if (cacheApelidos) return cacheApelidos;
+  cacheApelidos = new Map();
+  const linhas = db.prepare("SELECT order_number, apelidos FROM orders WHERE apelidos IS NOT NULL AND apelidos != ''").all();
+  for (const l of linhas) {
+    for (const a of String(l.apelidos).split(",")) {
+      const chave = a.trim();
+      if (chave && chave !== l.order_number) cacheApelidos.set(chave, l.order_number);
+    }
+  }
+  return cacheApelidos;
+}
+
+function invalidarApelidos() {
+  cacheApelidos = null;
+}
+
+/** Se este numero ja foi absorvido por outro pedido, devolve o dono. */
+export function resolverCanonico(numero) {
+  const n = String(numero);
+  // Uma volta so: o dono de um apelido nunca e, ele proprio, apelido de
+  // terceiro -- a mesclagem sempre grava o canonico do momento.
+  return mapaDeApelidos().get(n) || n;
+}
+
 /**
  * Faz merge (nao sobrescreve) dos campos passados sobre o pedido existente
  * (se houver), recalcula o status final (pior de WMS x transportadora) e
@@ -251,7 +290,7 @@ const upsertStmt = db.prepare(`
  * carrierSeverity -- a menos que quem chamar force um `status` explicito.
  */
 export function upsertOrder(partial) {
-  const orderNumber = String(partial.orderNumber);
+  const orderNumber = resolverCanonico(partial.orderNumber);
   const existing = getOrder(orderNumber) || {};
 
   const merged = {
@@ -300,7 +339,9 @@ export function getMeta(key) {
 }
 
 export function apagarPedido(orderNumber) {
-  return db.prepare("DELETE FROM orders WHERE order_number = ?").run(String(orderNumber)).changes;
+  const n = db.prepare("DELETE FROM orders WHERE order_number = ?").run(String(orderNumber)).changes;
+  invalidarApelidos();
+  return n;
 }
 
 /**
@@ -364,6 +405,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     upsertOrder({ orderNumber: canonico, ...preencher });
     apagarPedido(apelido);
 
+    invalidarApelidos();
     resultado.mesclados++;
     resultado.apelidosApagados.push(apelido);
   }
