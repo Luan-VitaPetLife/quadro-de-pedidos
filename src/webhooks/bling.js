@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { urlDeAutorizacao, trocarCodePorToken, lerTokens } from "../integrations/bling.js";
 import { getMeta } from "../lib/db.js";
 import { verifyMandaeWebhook } from "./mandae.js";
+import { comTravaDeSincronizacao, sincronizacaoEmCurso } from "../lib/travaDeSincronizacao.js";
 
 // O `state` amarra o retorno do Bling ao pedido de autorizacao que NOS
 // fizemos. Sem ele, qualquer pessoa poderia chamar /bling/callback com um code
@@ -100,7 +101,7 @@ export function handleStatus(req, res) {
     // O desfecho da ultima rodada, pra distinguir "ainda rodando" de "morreu no
     // meio" sem depender do log do container.
     sincronizacao: {
-      emCurso: sincronizacaoEmCurso,
+      emCurso: sincronizacaoEmCurso(),
       comecouEm: getMeta("sincronizacaoComecouEm"),
       terminouEm: getMeta("sincronizacaoTerminouEm"),
       etapa: getMeta("sincronizacaoEtapa") || null,
@@ -172,16 +173,15 @@ export async function handleDiagnostico(req, res) {
 // chamada por pedido, com intervalo pra respeitar o limite do Bling), entao
 // responde na hora e segue trabalhando em segundo plano -- se esperasse, o
 // proxy do Railway cortaria a conexao antes do fim.
-let sincronizacaoEmCurso = false;
+
 
 export async function handleSincronizar(req, res) {
   if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
-  if (sincronizacaoEmCurso) {
+  if (sincronizacaoEmCurso()) {
     return res.status(409).json({ error: "ja existe uma sincronizacao do Bling em andamento" });
   }
 
   const dias = Number(req.query?.dias) || 30;
-  sincronizacaoEmCurso = true;
   res.json({ ok: true, iniciada: true, dias, acompanhe: "veja os logs do Railway ou /bling/status" });
 
   // O desfecho vai pro meta, nao so pro log.
@@ -198,13 +198,16 @@ export async function handleSincronizar(req, res) {
   setMeta("sincronizacaoErro", "");
   try {
     const { runSyncBling } = await import("../sync-bling.js");
-    const r = await runSyncBling({ dias });
-    setMeta("sincronizacaoResultado", JSON.stringify(r));
+    const { rodou, resultado } = await comTravaDeSincronizacao(() => runSyncBling({ dias }));
+    if (!rodou) {
+      setMeta("sincronizacaoErro", "outra sincronizacao ja estava em andamento");
+    } else {
+      setMeta("sincronizacaoResultado", JSON.stringify(resultado));
+    }
   } catch (err) {
     console.error("[bling] sincronizacao falhou:", err.message);
     setMeta("sincronizacaoErro", `${err.message} (em ${new Date().toISOString()})`);
   } finally {
-    sincronizacaoEmCurso = false;
     setMeta("sincronizacaoTerminouEm", new Date().toISOString());
   }
 }
