@@ -29,6 +29,8 @@ import {
   ehNaturezaDeBonificacao,
   objetoDePostagem,
   situacoesDeVenda,
+  notaVale,
+  nomeDaSituacaoDaNota,
 } from "./integrations/bling.js";
 import { mapTextoDaTransportadora, ehEventoFinal } from "./lib/statusMapping.js";
 import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
@@ -82,13 +84,20 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
     // seria lido como "pedido sem nota" -- e ai o codigo de rastreio seria
     // apagado como autoritativo e o temNota cairia. A economia teria destruido
     // justamente os quadrados que ja estavam certos.
-    if (jaSabidoEEncerrado(n.numero, indiceDeNotas)) {
+    // Nota sem valor nunca e pulada: ela existe pra ser DESMONTADA.
+    const valeEsta = notaVale(n.situacao);
+    if (valeEsta && jaSabidoEEncerrado(n.numero, indiceDeNotas)) {
       puladas++;
       porId.set(String(n.id), {
         id: String(n.id),
         numero: String(n.numero ?? "").trim() || null,
         volumes: [],
         pular: true,
+        // `vale` PRECISA vir junto: mais adiante a rotina que desmonta nota sem
+        // valor testa `!nota.vale`, e `undefined` e falso -- sem isto toda nota
+        // pulada (isto e, toda entrega ja concluida) seria desmontada.
+        vale: true,
+        situacao: n.situacao ?? null,
         usada: false,
       });
       continue;
@@ -110,6 +119,10 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
       cliente: detalhe?.contato?.nome || n?.contato?.nome || null,
       lojaId: detalhe?.loja?.id ?? n?.loja?.id ?? null,
       emissao: n.dataEmissao || detalhe?.dataEmissao || null,
+      // Nota rejeitada ou cancelada nunca virou remessa: nao da rastreio, nao
+      // conta como nota emitida e nao merece quadrado.
+      situacao: n.situacao ?? detalhe?.situacao ?? null,
+      vale: notaVale(n.situacao ?? detalhe?.situacao),
       transportador: detalhe?.transporte?.transportador?.nome || null,
       // O id do volume e a chave do OBJETO DE POSTAGEM, que e onde o codigo de
       // rastreio realmente mora. A nota devolve so o id; o codigo vem de
@@ -134,7 +147,7 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
   // momento em que a remessa vai pro WMS -- antes dela, o que esta no pedido
   // nao vale como verdade.
   for (const nota of porId.values()) {
-    if (nota.pular) continue;
+    if (nota.pular || !nota.vale) continue;
     for (const idVolume of nota.volumes) {
       const objeto = await objetoDePostagem(idVolume);
       if (!objeto) continue;
@@ -179,7 +192,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const paraMesclarPorNota = [];
 
   const situacoes = await situacoesDeVenda();
-  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, porSituacao: {} };
+  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, notasSemValor: 0, porSituacao: {} };
 
   let n = 0;
   for (const resumido of lista) {
@@ -195,8 +208,12 @@ export async function runSyncBling({ dias = 30 } = {}) {
       // O pedido referencia a nota SO PELO ID. Buscar o numero no mapa e o que
       // permite usa-lo como apelido -- sem isso, o quadrado criado pela Mandae
       // (que usa o numero da NF) nunca se junta ao do pedido.
-      const nota = detalhe?.notaFiscal?.id ? notas.get(String(detalhe.notaFiscal.id)) : null;
-      if (nota) nota.usada = true;
+      const notaBruta = detalhe?.notaFiscal?.id ? notas.get(String(detalhe.notaFiscal.id)) : null;
+      if (notaBruta) notaBruta.usada = true;
+      // Rejeitada ou cancelada vale o mesmo que nao existir: o pedido volta a
+      // ser "ainda nao faturado", e o codigo que ele carregue e apagado.
+      const nota = notaBruta && notaBruta.vale === false ? null : notaBruta;
+      if (notaBruta && !nota) r.notasSemValor++;
 
       // O rastreio vem da NOTA, nunca do pedido. Pedido sem nota nao tem
       // rastreio nenhum -- e a etiqueta que ele por acaso carregue e lixo, como
@@ -292,7 +309,27 @@ export async function runSyncBling({ dias = 30 } = {}) {
   marcar("notas sem pedido");
   // Notas que nenhum pedido referenciou: remessas que nasceram como nota.
   for (const nota of notas.values()) {
-    if (nota.usada || !nota.numero) continue;
+    if (!nota.numero) continue;
+
+    // Nota rejeitada/cancelada que criou quadrado numa rodada anterior: o
+    // quadrado e desmontado aqui. Sem isto ele sobreviveria para sempre --
+    // ninguem mais escreve nele, entao nada o corrigiria. Foi o caso do
+    // "000054" da Cristiane Simon, vermelho por uma etiqueta que nunca existiu.
+    if (!nota.vale) {
+      if (getOrder(nota.numero)) {
+        upsertOrder({
+          orderNumber: nota.numero,
+          trackingCode: null,
+          trackingCodeAutoritativo: true,
+          temNota: false,
+          situacaoBling: `Nota ${nomeDaSituacaoDaNota(nota.situacao) || "sem valor"}`,
+        });
+        r.notasSemValor++;
+      }
+      continue;
+    }
+
+    if (nota.usada) continue;
     const jaExiste = !!getOrder(nota.numero);
     // O rastreio e o status ja vieram do objeto de postagem em lerNotas().
     const rastreio = nota.rastreio || null;
