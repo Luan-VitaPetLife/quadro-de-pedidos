@@ -199,11 +199,20 @@ export async function handlePenteFino(req, res) {
       const quando = evento.timestamp || evento.date || null;
       const agendada = coletaPrevista(tracking) || null;
 
+      // O movimento entra na comparacao de proposito: ele nao vem de evento
+      // novo, e a mesma resposta da Mandae lida de outro jeito. Sem isto, um
+      // pedido cujo ultimo evento e antigo e conhecido nunca seria regravado --
+      // e foi exatamente o que aconteceu com o 1239, que continuou amarelo
+      // depois da varredura porque "nada mudou" pelo criterio antigo.
+      const movimento = ultimoMovimento(tracking.events || []);
+
       const mudou =
         mapeado.label !== o.carrierStatus ||
         mapeado.status !== o.carrierSeverity ||
         (quando && quando !== o.lastEventAt) ||
-        agendada !== (o.coletaPrevista || null);
+        agendada !== (o.coletaPrevista || null) ||
+        (movimento || null) !== (o.ultimoMovimentoAt || null) ||
+        o.rastreioDesconhecido;
       if (!mudou) continue;
 
       achados.eventoAtrasado.push({
@@ -212,6 +221,7 @@ export async function handlePenteFino(req, res) {
         noQuadro: o.carrierStatus || "(nenhum)",
         naMandae: mapeado.label,
         quando,
+        ultimoMovimento: movimento,
       });
       if (corrigir) {
         upsertOrder({
@@ -219,7 +229,7 @@ export async function handlePenteFino(req, res) {
           carrierStatus: mapeado.label,
           carrierSeverity: mapeado.status,
           coletaPrevista: agendada,
-          ultimoMovimentoAt: ultimoMovimento(tracking.events || []) ?? undefined,
+          ultimoMovimentoAt: movimento ?? undefined,
           rastreioDesconhecido: false,
           // Nunca "agora": o relogio do envelhecimento conta a partir do evento
           // de verdade. Carimbar a hora da varredura zeraria o contador de todo
