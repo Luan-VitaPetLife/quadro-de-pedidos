@@ -201,10 +201,22 @@ export async function runSyncBling({ dias = 30 } = {}) {
       // O rastreio vem da NOTA, nunca do pedido. Pedido sem nota nao tem
       // rastreio nenhum -- e a etiqueta que ele por acaso carregue e lixo, como
       // provou o "VITPT000242" do pedido 1234.
-      // Nota pulada nao opina: o quadrado ja tem o codigo e o status dela, e
-      // `undefined` faz o upsert preservar o que existe.
-      const notaOpina = !!nota && !nota.pular;
-      const rastreio = notaOpina ? nota.rastreio || null : undefined;
+      // Quem opina sobre o codigo de rastreio, e quem nao opina.
+      //
+      // Tres casos, e a primeira versao disto errava o terceiro:
+      //
+      //   nota lida    opina, e o codigo dela vale
+      //   nota pulada  NAO opina -- o quadrado ja tem o codigo e o status dela,
+      //                e `undefined` faz o upsert preservar o que existe
+      //   sem nota     opina, e o codigo certo e NENHUM
+      //
+      // O terceiro e o motivo da regra existir: o pedido 1234 nao tem nota e
+      // carrega "VITPT000242", uma etiqueta que nunca virou encomenda. Ao
+      // escrever a economia de chamadas eu troquei `!!nota && !nota.pular`, que
+      // tambem faz "sem nota" nao opinar -- e o codigo morto sobreviveu a
+      // sincronizacao inteira.
+      const notaOpina = !nota || !nota.pular;
+      const rastreio = notaOpina ? nota?.rastreio || null : undefined;
 
       // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
       const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
