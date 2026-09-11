@@ -31,11 +31,12 @@ export async function handlePenteFino(req, res) {
     rastreioDivergente: [],
     rastreioFaltando: [],
     rastreioDesconhecido: [],
+    situacaoDivergente: [],
     faltandoNoQuadro: [],
     eventoAtrasado: [],
     semFonteNenhuma: [],
   };
-  const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0, criados: 0, marcadosDesconhecidos: 0 };
+  const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0, criados: 0, marcadosDesconhecidos: 0, situacoesAtualizadas: 0 };
 
   const quadro = listOrders();
 
@@ -61,7 +62,8 @@ export async function handlePenteFino(req, res) {
   // -------------------------------------------------------------------
   let conferidosNoBling = 0;
   try {
-    const { listarPedidos, detalhePedido, extrairDoPedido } = await import("../integrations/bling.js");
+    const { listarPedidos, detalhePedido, extrairDoPedido, situacoesDeVenda } = await import("../integrations/bling.js");
+    const situacoes = await situacoesDeVenda();
     const hoje = new Date();
     const inicio = new Date(hoje.getTime() - dias * 86400000);
     const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
@@ -81,10 +83,26 @@ export async function handlePenteFino(req, res) {
       const canonico = resolverCanonico(numero);
       const noQuadro = getOrder(canonico);
 
+      // A situacao do pedido no ERP e a unica fonte que sabe de cancelamento --
+      // e o quadro nao pode chamar de "seguindo bem" uma venda cancelada.
+      const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
+      if (noQuadro && situacao && situacao !== noQuadro.situacaoBling) {
+        achados.situacaoDivergente.push({
+          pedido: canonico,
+          noQuadro: noQuadro.situacaoBling || "(nenhuma)",
+          noBling: situacao,
+        });
+        if (corrigir) {
+          upsertOrder({ orderNumber: canonico, situacaoBling: situacao });
+          corrigidos.situacoesAtualizadas++;
+        }
+      }
+
       if (!noQuadro) {
-        // Pedido que ja tem rastreio ou nota deveria ter quadrado. Pedido sem
-        // nenhum dos dois ainda nao virou entrega -- nao e ausencia, e cedo.
-        if (rastreioBling || detalhe?.notaFiscal?.id) {
+        // SO a nota decide se deveria haver quadrado. Rastreio no pedido nao
+        // conta: o pedido 1234 tinha um e era uma venda abandonada, com uma
+        // etiqueta que nunca virou encomenda.
+        if (detalhe?.notaFiscal?.id) {
           achados.faltandoNoQuadro.push({
             pedido: numero,
             cliente: dados?.cliente || null,
@@ -100,7 +118,8 @@ export async function handlePenteFino(req, res) {
               trackingCode: rastreioBling || undefined,
               placedAt: dados?.data || undefined,
               previsaoEntrega: detalhe?.dataPrevista || undefined,
-              temNota: !!detalhe?.notaFiscal?.id,
+              temNota: true,
+              situacaoBling: situacao || undefined,
             });
             corrigidos.criados++;
           }
@@ -254,6 +273,7 @@ export async function handlePenteFino(req, res) {
       rastreioDivergente: achados.rastreioDivergente.length,
       rastreioFaltando: achados.rastreioFaltando.length,
       rastreioDesconhecido: achados.rastreioDesconhecido.length,
+      situacaoDivergente: achados.situacaoDivergente.length,
       faltandoNoQuadro: achados.faltandoNoQuadro.length,
       eventoAtrasado: achados.eventoAtrasado.length,
       semFonteNenhuma: achados.semFonteNenhuma.length,

@@ -98,6 +98,13 @@ app.get("/api/diagnostico", (req, res) => {
     instanciaAnterior: d?.anterior ?? null,
     memoriaMB: Math.round(process.memoryUsage().rss / 1048576),
     node: process.version,
+    // Qual commit esta realmente no ar.
+    //
+    // Sem isto eu disparei uma sincronizacao achando que a versao nova ja
+    // estava rodando -- o "esta de pe ha poucos segundos" tambem e verdade
+    // para o REINICIO ANTERIOR, entao esperar por ele nao prova nada. O
+    // resultado foi eu interpretar dado velho como se fosse da regra nova.
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) || null,
   });
 });
 
