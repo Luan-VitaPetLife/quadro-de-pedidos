@@ -42,7 +42,12 @@ export function startScheduler() {
     try {
       const dias = Number(process.env.BLING_DIAS || 30);
       const { runSyncBling } = await import("./sync-bling.js");
-      await runSyncBling({ dias });
+      const { comTravaDeSincronizacao } = await import("./lib/travaDeSincronizacao.js");
+      // Pela trava, nao direto: uma sincronizacao disparada a mao pode estar
+      // rodando, e duas ao mesmo tempo so dividem o orcamento de chamadas da
+      // API entre si -- as duas terminam na metade da velocidade.
+      const { rodou } = await comTravaDeSincronizacao(() => runSyncBling({ dias }));
+      if (!rodou) console.log("[scheduler] ja havia uma sincronizacao do Bling em andamento; pulei esta.");
     } catch (err) {
       if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) {
         console.log("[scheduler] Bling ainda nao autorizado; pulando. (abra /bling/autorizar?s=SEGREDO)");
