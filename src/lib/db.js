@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -118,12 +118,24 @@ function rowToOrder(r) {
   // A cor base e recalculada na LEITURA, nao herdada da gravacao: a regra do
   // handover depende dos rotulos das duas fontes, e recalcular aqui faz os
   // registros antigos se corrigirem sozinhos, sem precisar reescrever o banco.
-  const base = combinarComHandover({
-    wmsSeverity: r.wms_severity,
+  // Nota emitida e etiqueta criada, primeiro evento ainda nao: nao e duvida,
+  // e o comeco normal da viagem. Sem isto o pedido nasce amarelo e fica assim
+  // ate a transportadora bipar a primeira vez.
+  const esperandoPrimeiro = aguardandoPrimeiroEvento({
+    temNota: r.tem_nota === 1,
+    trackingCode: r.tracking_code,
     wmsStatus: r.wms_status,
-    carrierSeverity: r.carrier_severity,
     carrierStatus: r.carrier_status,
   });
+
+  const base = esperandoPrimeiro
+    ? "green"
+    : combinarComHandover({
+        wmsSeverity: r.wms_severity,
+        wmsStatus: r.wms_status,
+        carrierSeverity: r.carrier_severity,
+        carrierStatus: r.carrier_status,
+      });
 
   const envelhecido = naoAcompanhado
     ? { status: "green", diasParados: 0, motivo: null }
@@ -173,6 +185,7 @@ function rowToOrder(r) {
     motivoStatus: motivo,
     diasAtePrevisao: previsao.diasAtePrevisao,
     semAcompanhamento: naoAcompanhado,
+    aguardandoPrimeiroEvento: esperandoPrimeiro,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
     wmsStatus: r.wms_status,
     carrierStatus: r.carrier_status,
@@ -288,6 +301,48 @@ export function resolverCanonico(numero) {
   return mapaDeApelidos().get(n) || n;
 }
 
+// ---------------------------------------------------------------------------
+// Quem e o dono de uma nota fiscal
+// ---------------------------------------------------------------------------
+//
+// O WMS batiza cada remessa com um numero proprio -- "ATB0240367" -- que nao
+// existe em lugar nenhum alem do portal dele. O unico elo entre esse numero e o
+// pedido do Bling e a NOTA FISCAL: o portal mostra "258 - 001", o Bling mostra
+// "000274", e chaveNota() reduz os dois ao mesmo numero.
+//
+// Ate agora essa ligacao so acontecia na sincronizacao do Bling, DEPOIS do
+// estrago: o WMS criava o quadrado ATB, ele ficava la duplicando o pedido ate a
+// proxima rodada, e so entao era absorvido. Resolver na hora da escrita fecha a
+// janela -- o quadrado duplicado nunca chega a existir.
+
+let cacheNotas = null;
+
+function mapaDeNotas() {
+  if (cacheNotas) return cacheNotas;
+  cacheNotas = new Map();
+  for (const l of db.prepare("SELECT order_number, nota_fiscal FROM orders WHERE nota_fiscal IS NOT NULL").all()) {
+    const chave = chaveNota(l.nota_fiscal);
+    if (!chave) continue;
+    // O primeiro a registrar a nota e o dono. Na pratica o Bling chega antes
+    // (roda sozinho de 2 em 2 horas) e o WMS e manual, entao o dono tende a ser
+    // o numero do pedido -- que e justamente o que a operacao reconhece.
+    if (!cacheNotas.has(chave)) cacheNotas.set(chave, l.order_number);
+  }
+  return cacheNotas;
+}
+
+function invalidarNotas() {
+  cacheNotas = null;
+}
+
+/** Quem ja ocupa o quadrado desta nota fiscal, se nao for o proprio numero. */
+export function donoDaNota(notaFiscal, excluir) {
+  const chave = chaveNota(notaFiscal);
+  if (!chave) return null;
+  const dono = mapaDeNotas().get(chave);
+  return dono && dono !== excluir ? dono : null;
+}
+
 /**
  * Faz merge (nao sobrescreve) dos campos passados sobre o pedido existente
  * (se houver), recalcula o status final (pior de WMS x transportadora) e
@@ -301,7 +356,38 @@ export function resolverCanonico(numero) {
  * carrierSeverity -- a menos que quem chamar force um `status` explicito.
  */
 export function upsertOrder(partial) {
-  const orderNumber = resolverCanonico(partial.orderNumber);
+  let orderNumber = resolverCanonico(partial.orderNumber);
+  let apelidoNovo = null;
+
+  // `numeroProvisorio` e a fonte declarando: "este numero e invencao minha".
+  //
+  // So o WMS usa. A direcao da mesclagem precisa ser dita por quem escreve e
+  // nao adivinhada aqui: se o db tentasse deduzir sozinho quem e o canonico,
+  // uma hora inverteria e o quadro passaria a se chamar "ATB0240367" em vez do
+  // numero do pedido -- que e o que a operacao procura.
+  if (partial.numeroProvisorio && partial.notaFiscal) {
+    const dono = donoDaNota(partial.notaFiscal, orderNumber);
+    if (dono) {
+      if (getOrder(orderNumber)) {
+        // O quadrado provisorio ja existia (rodada anterior): funde e some.
+        mesclarEmCanonico(dono, [orderNumber]);
+      } else {
+        // Ainda nao existe: nem chega a nascer. Guarda o numero como apelido
+        // pra quem tiver "ATB0240367" na mao continuar achando o pedido.
+        apelidoNovo = orderNumber;
+      }
+      orderNumber = dono;
+    }
+  }
+
+  // O outro lado da mesma moeda: `canonicoDaNota` e o Bling dizendo "este e o
+  // nome de verdade desta nota". Se alguem ja esta ocupando o quadrado dela --
+  // tipicamente um ATB que o WMS criou antes do Bling passar por aqui -- ele e
+  // absorvido agora, e nao so na proxima sincronizacao.
+  const absorver = partial.canonicoDaNota && partial.notaFiscal
+    ? donoDaNota(partial.notaFiscal, orderNumber)
+    : null;
+
   const existing = getOrder(orderNumber) || {};
 
   const merged = {
@@ -317,7 +403,7 @@ export function upsertOrder(partial) {
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
     notaFiscal: partial.notaFiscal ?? existing.notaFiscal ?? null,
     coletaPrevista: partial.coletaPrevista !== undefined ? partial.coletaPrevista : existing.coletaPrevista ?? null,
-    apelidos: (partial.apelidos ?? existing.apelidos ?? []).join ? [...new Set([...(existing.apelidos || []), ...(partial.apelidos || [])])].join(",") : null,
+    apelidos: [...new Set([...(existing.apelidos || []), ...(partial.apelidos || []), ...(apelidoNovo ? [apelidoNovo] : [])])].join(",") || null,
     temNota: partial.temNota !== undefined ? (partial.temNota ? 1 : 0) : (existing.temNota ? 1 : 0),
     trackingCode: partial.trackingCode ?? existing.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
@@ -330,6 +416,16 @@ export function upsertOrder(partial) {
   merged.status = partial.status ?? combineStatus(merged.wmsSeverity, merged.carrierSeverity);
 
   upsertStmt.run({ ...merged, updatedAt: new Date().toISOString() });
+  if (apelidoNovo) invalidarApelidos();
+  if (merged.notaFiscal !== (existing.notaFiscal ?? null)) invalidarNotas();
+
+  // Depois da gravacao, nunca antes: mesclar exige que o quadrado canonico ja
+  // exista pra receber o que o outro sabia.
+  if (absorver) {
+    mesclarEmCanonico(orderNumber, [absorver]);
+    invalidarNotas();
+    return getOrder(orderNumber) || merged;
+  }
   return merged;
 }
 

@@ -8,6 +8,7 @@ import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
 import { handleInvestigar } from "./webhooks/investigar.js";
+import { handlePenteFino } from "./webhooks/penteFino.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
 import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar, handleSonda } from "./webhooks/bling.js";
 
@@ -77,6 +78,10 @@ app.get("/bling/sonda", handleSonda);
 
 // Rastreia um pedido/cliente nos tres sistemas -- a ferramenta de cacar pedido perdido.
 app.get("/api/investigar", handleInvestigar);
+
+// Pente fino: confere o quadro INTEIRO contra o Bling e a Mandae e lista as
+// divergencias. Com ?corrigir=1 aplica as correcoes seguras.
+app.get("/api/pente-fino", handlePenteFino);
 
 // Diagnostico do PROCESSO: como a instancia anterior terminou, quantas vezes
 // ja subiu neste volume, ha quanto tempo esta de pe. E o que responde "por que

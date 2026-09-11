@@ -48,6 +48,11 @@ export async function handleFontesLog(req, res) {
       notaFiscal: p.notaFiscal || undefined,
       wmsSeverity: p.severidade || mapFontesLogStatus(p.status),
       lastEventAt: p.ultimoMovimento || undefined,
+      // "ATB0240367" e nome que so existe dentro do portal da FontesLog. Se a
+      // nota dessa remessa ja tem quadrado, e nele que este status entra --
+      // senao o mesmo pedido aparece duas vezes, um lado com o status do
+      // armazem e outro com o rastreio, cada um contando metade da historia.
+      numeroProvisorio: true,
     });
     gravados++;
   }

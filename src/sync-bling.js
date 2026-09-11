@@ -142,6 +142,18 @@ export async function runSyncBling({ dias = 30 } = {}) {
         previsaoEntrega: detalhe?.dataPrevista || undefined,
         natureza: nota?.natureza || undefined,
         bonificacao: nota?.bonificacao || undefined,
+        // O NUMERO da nota, e nao so o fato de existir uma.
+        //
+        // Guardar so `temNota` custou caro: 117 quadrados sabiam que tinham
+        // nota e nao sabiam qual. Isso escondia o numero que a operacao usa pra
+        // achar o pedido no sistema E deixava o quadro sem a unica chave que
+        // liga um pedido do Bling a uma remessa do WMS -- que se chama
+        // "ATB0240367" e so se identifica pela coluna Nota Fiscal do portal.
+        notaFiscal: nota?.numero || undefined,
+        // O numero do pedido do Bling e o nome que a operacao reconhece, entao
+        // e ele que fica com o quadrado -- qualquer ATB que esteja ocupando o
+        // lugar desta nota e absorvido na hora.
+        canonicoDaNota: true,
         // Nota emitida e o marco que separa "ainda nao faturado" de "a caminho".
         // A regra de prazo usa isso: pra pedido sem nota, a data prevista e o
         // limite pra emitir a NF, nao a previsao de entrega.
@@ -184,6 +196,8 @@ export async function runSyncBling({ dias = 30 } = {}) {
       brand: (await nomeDaLoja(nota.lojaId)) || undefined,
       natureza: nota.natureza || undefined,
       bonificacao: nota.bonificacao || undefined,
+      notaFiscal: nota.numero,
+      canonicoDaNota: true,
       placedAt: nota.emissao || undefined,
       temNota: true,
     });

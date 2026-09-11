@@ -333,6 +333,29 @@ export function semAcompanhamento({ trackingCode, wmsStatus, carrierStatus }) {
 }
 
 // ---------------------------------------------------------------------------
+// Etiqueta criada, primeiro evento ainda nao
+// ---------------------------------------------------------------------------
+//
+// Caso do pedido 1479 (Luciene Bento): nota emitida as 14h41, etiqueta da
+// Mandae criada junto, e nenhum evento de rastreio ainda -- porque a coleta e
+// mais tarde. O quadro pintava isso de AMARELO, porque nao tinha status de
+// fonte nenhuma e combineStatus() trata "nao sei" como aviso.
+//
+// Mas "a etiqueta nasceu ha duas horas" nao e nao-saber: e saber que esta tudo
+// no ritmo. Amarelo quer dizer "alguem precisa agir", e nao ha o que agir num
+// pedido faturado ha pouco. Este e o mesmo erro que ja custou quatro rodadas de
+// alarme falso neste projeto -- o quadro afirmando pendencia onde so havia
+// ausencia de noticia.
+//
+// A ausencia vira pendencia sozinha: o envelhecimento continua correndo por
+// cima, entao se a Mandae seguir muda por 5 dias uteis o quadrado amarela, e
+// por 10, avermelha. A regra so tira o alarme do dia zero.
+export function aguardandoPrimeiroEvento({ temNota, trackingCode, wmsStatus, carrierStatus }) {
+  if (wmsStatus || carrierStatus) return false; // alguma fonte ja falou
+  return !!(temNota && trackingCode);
+}
+
+// ---------------------------------------------------------------------------
 // Coleta prevista
 // ---------------------------------------------------------------------------
 //
