@@ -573,3 +573,34 @@ body.tv .board-topo { display: none; }
   .indicador, .cortina, .painel { transition: none !important; }
   .painel { transform: none; }
 }
+
+/* ── Voltou de outro dia ─────────────────────────────────────────────────
+   Pendência antiga que reaparece no quadro. A borda pontilhada no topo e o
+   relógio de histórico dizem, antes de qualquer leitura, que aquele cartão
+   não é do dia escolhido — sem isso ele se confunde com os de hoje e a
+   contagem do dia parece errada. */
+.sq.de-outro-dia { border-top-style: dotted; border-top-width: 2px; }
+.sq .relogio {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  width: 11px;
+  height: 11px;
+  opacity: .8;
+}
+/* Espaço para a marca não encostar no número em cartão pequeno. */
+.sq.de-outro-dia .num { padding-left: 10px; padding-right: 10px; }
+
+/* Legenda do relógio: o mesmo desenho do cartão, para o olho ligar os dois. */
+.legenda .com-relogio::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: var(--icone-relogio) center / contain no-repeat;
+  mask: var(--icone-relogio) center / contain no-repeat;
+}
+:root {
+  --icone-relogio: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 3-6.7L3 8'/%3E%3Cpath d='M3 3v5h5'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E");
+}

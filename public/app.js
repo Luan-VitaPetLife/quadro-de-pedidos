@@ -195,12 +195,43 @@ function intervalo() {
   }
 }
 
-function dentroDoPeriodo(o) {
-  const faixa = intervalo();
+function dentroDaFaixa(o, faixa) {
   if (!faixa) return true;
   const d = dataDoPedido(o);
   return d ? d >= faixa[0] && d <= faixa[1] : false;
 }
+
+// ---------------------------------------------------------------------------
+// Pendência de outro dia volta pro quadro
+// ---------------------------------------------------------------------------
+//
+// O quadro deixa de responder "o que aconteceu hoje" e passa a responder "o
+// que precisa de ação hoje" -- que é a pergunta de quem está olhando.
+//
+// Um extravio de terça não deixa de ser problema na quinta. Preso ao filtro de
+// data, ele sumia da tela no dia seguinte e só reaparecia se alguém lembrasse
+// de trocar o período para "Tudo" -- ou seja, justamente o pedido que ninguém
+// resolveu era o que ficava mais fácil de esquecer.
+//
+// Só volta o que está pendente. Pedido verde de outro dia seguiu seu caminho e
+// não tem nada a cobrar; trazê-lo de volta seria encher a tela com o que já
+// deu certo.
+function ehPendencia(o) {
+  return o.status !== "green";
+}
+
+function deOutroDia(o) {
+  const faixa = intervalo();
+  if (!faixa) return false; // em "Tudo" não existe "outro dia"
+  return !dentroDaFaixa(o, faixa);
+}
+
+function dentroDoPeriodo(o) {
+  const faixa = intervalo();
+  if (!faixa) return true;
+  return dentroDaFaixa(o, faixa) || ehPendencia(o);
+}
+
 
 // ---------------------------------------------------------------------------
 // Grade
@@ -251,9 +282,13 @@ function render() {
   document.getElementById("cRed").textContent = contas.red;
 
   const conta = document.getElementById("boardConta");
-  if (conta) conta.textContent = lista.length === noPeriodo.length
-    ? `${lista.length} pedido${lista.length === 1 ? "" : "s"}`
-    : `${lista.length} de ${noPeriodo.length} pedidos`;
+  if (conta) {
+    const voltaram = lista.filter(deOutroDia).length;
+    const base = lista.length === noPeriodo.length
+      ? `${lista.length} pedido${lista.length === 1 ? "" : "s"}`
+      : `${lista.length} de ${noPeriodo.length} pedidos`;
+    conta.textContent = voltaram ? `${base} · ${voltaram} de outros dias` : base;
+  }
 
   marcarSegmento("filters", "filter", state.filter);
   marcarSegmento("periodos", "periodo", state.periodo);
@@ -290,6 +325,25 @@ function cartao(o) {
     c.textContent = o.customer;
     el.appendChild(c);
   }
+  // Marca de "voltou de outro dia": relógio com a seta anti-horária, o ícone
+  // universal de histórico. Vem antes do número porque a primeira pergunta de
+  // quem vê o cartão passa a ser "isso é de hoje?".
+  if (deOutroDia(o)) {
+    el.classList.add("de-outro-dia");
+    const marca = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    marca.setAttribute("class", "relogio");
+    marca.setAttribute("viewBox", "0 0 24 24");
+    marca.setAttribute("fill", "none");
+    marca.setAttribute("stroke", "currentColor");
+    marca.setAttribute("stroke-width", "2.2");
+    marca.setAttribute("stroke-linecap", "round");
+    marca.setAttribute("stroke-linejoin", "round");
+    marca.setAttribute("aria-hidden", "true");
+    marca.innerHTML =
+      '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>';
+    el.appendChild(marca);
+  }
+
   if (o.bonificacao) {
     const b = document.createElement("span");
     b.className = "boni";
@@ -378,6 +432,14 @@ function abrirPainel(numero) {
   selo.className = "selo " + o.status;
   selo.textContent = palavraStatus[o.status] || o.status;
   painel.appendChild(selo);
+
+  if (deOutroDia(o)) {
+    const v = document.createElement("div");
+    v.className = "motivo neutro";
+    v.textContent =
+      `Pedido de ${fmtDia(dataDoPedido(o)) || "outro dia"}. Aparece aqui porque continua pendente.`;
+    painel.appendChild(v);
+  }
 
   if (o.motivoStatus) {
     const m = document.createElement("div");
