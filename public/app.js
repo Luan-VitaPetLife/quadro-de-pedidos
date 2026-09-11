@@ -746,9 +746,16 @@ setInterval(poll, POLL_MS);
 // ---------------------------------------------------------------------------
 // Gaveta dos ocultos
 // ---------------------------------------------------------------------------
-const ocultosBtn = document.getElementById("ocultosBtn");
-
+// O elemento e buscado DENTRO da funcao, nao guardado num const aqui em cima.
+//
+// Este bloco esta no fim do arquivo, e render() -- que chama esta funcao -- roda
+// antes dele, la na linha 737. Um `const` no fim so existe depois que a linha
+// dele executa: ler antes disso nao devolve undefined, lanca ReferenceError. O
+// erro acontecia no topo do script, entao o `poll()` logo abaixo nunca chegava a
+// rodar e o quadro ficava eternamente em "Conectando...".
 function atualizarBotaoOcultos() {
+  const ocultosBtn = document.getElementById("ocultosBtn");
+  if (!ocultosBtn) return;
   if (state.vendoOcultos) {
     ocultosBtn.hidden = false;
     ocultosBtn.textContent = "Voltar ao quadro";
@@ -762,7 +769,7 @@ function atualizarBotaoOcultos() {
   delete ocultosBtn.dataset.active;
 }
 
-ocultosBtn.addEventListener("click", async () => {
+document.getElementById("ocultosBtn").addEventListener("click", async () => {
   state.vendoOcultos = !state.vendoOcultos;
   await poll();
 });
