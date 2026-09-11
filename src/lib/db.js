@@ -269,9 +269,20 @@ function invalidarApelidos() {
   cacheApelidos = null;
 }
 
+// O portal do WMS escapa acento como entidade numerica, e ja aconteceu de o
+// MESMO pedido chegar as vezes cru ("PROJETO NAT&#193;LIA") e as vezes decodificado
+// ("PROJETO NATALIA" com acento), virando dois quadrados. O numero do pedido e a
+// CHAVE do registro: se ele pode chegar em duas grafias, a normalizacao tem que
+// morar aqui, na porta de entrada, e nao em cada integracao.
+function decodificarNumero(texto) {
+  return texto
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, num) => String.fromCodePoint(Number(num)));
+}
+
 /** Se este numero ja foi absorvido por outro pedido, devolve o dono. */
 export function resolverCanonico(numero) {
-  const n = String(numero);
+  const n = decodificarNumero(String(numero)).replace(/\s+/g, " ").trim();
   // Uma volta so: o dono de um apelido nunca e, ele proprio, apelido de
   // terceiro -- a mesclagem sempre grava o canonico do momento.
   return mapaDeApelidos().get(n) || n;
@@ -443,3 +454,28 @@ export function indicePorNota() {
   }
   return mapa;
 }
+
+/**
+ * Conserta registros gravados ANTES de a normalizacao existir: quadrados cujo
+ * numero ainda carrega a entidade crua ("PROJETO NAT&#193;LIA"). Roda uma vez na
+ * subida, funde cada um no quadrado de grafia correta e some.
+ *
+ * Nao basta corrigir a porta de entrada: o registro velho nao recebe escrita
+ * nenhuma (o WMS agora escreve no nome decodificado), entao ele ficaria la
+ * parado para sempre, verde e sem cliente, dizendo respeito a um pedido que ja
+ * tem quadrado proprio.
+ */
+export function normalizarNumerosEscapados() {
+  let corrigidos = 0;
+  for (const o of listOrders()) {
+    const bruto = o.orderNumber;
+    const limpo = decodificarNumero(String(bruto)).replace(/\s+/g, " ").trim();
+    if (limpo === bruto) continue;
+    mesclarEmCanonico(limpo, [bruto]);
+    corrigidos++;
+  }
+  if (corrigidos) console.log(`[db] ${corrigidos} numero(s) escapado(s) normalizado(s).`);
+  return corrigidos;
+}
+
+normalizarNumerosEscapados();
