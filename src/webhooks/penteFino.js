@@ -14,7 +14,7 @@
 //   GET /api/pente-fino?s=<segredo>&dias=60&corrigir=1
 //   GET /api/pente-fino?s=<segredo>&limiteMandae=80
 
-import { listOrders, upsertOrder, mesclarEmCanonico, chaveNota, getOrder } from "../lib/db.js";
+import { listOrders, upsertOrder, mesclarEmCanonico, chaveNota, getOrder, resolverCanonico } from "../lib/db.js";
 import { verifyMandaeWebhook } from "./mandae.js";
 
 /** Agrupa por uma chave e devolve so os grupos com mais de um ocupante. */
@@ -29,10 +29,30 @@ function repetidos(pedidos, chaveDe) {
   return [...grupos.entries()].filter(([, lista]) => lista.length > 1);
 }
 
-// O canonico e quem NAO tem cara de numero interno do WMS: "ATB0240367" so
-// existe dentro do portal da FontesLog, e ninguem procura um pedido por ele.
+// Qual dos nomes fica com o quadrado.
+//
+// Nem todo numero identifica igual. Por ordem de quem a operacao reconhece:
+//
+//   1141          numero do pedido no Bling -- e o que a pessoa digita e procura
+//   000218        numero da nota fiscal -- identifica, mas e o segundo nome
+//   ATB0240367    numero interno do WMS -- so existe dentro do portal da FontesLog
+//   VITPT000375   o proprio codigo de rastreio virou nome, porque a Mandae
+//                 avisou de um envio que o quadro ainda nao conhecia
+//
+// Escolher errado nao perde dado (o perdedor vira apelido), mas troca o nome
+// que aparece no quadrado -- e um quadrado chamado "VITPT000375" nao ajuda
+// ninguem a achar o pedido.
+function forcaDoNome(numero) {
+  const n = String(numero);
+  const prefixo = (process.env.MANDAE_PREFIXO_RASTREIO || "VITPT").toUpperCase();
+  if (n.toUpperCase().startsWith(prefixo)) return 3;
+  if (/^ATB/i.test(n)) return 2;
+  if (/^0\d/.test(n)) return 1; // zeros a esquerda: cara de nota fiscal
+  return 0;
+}
+
 function escolherCanonico(lista) {
-  return lista.find((o) => !/^ATB/i.test(o.orderNumber)) || lista[0];
+  return [...lista].sort((a, b) => forcaDoNome(a.orderNumber) - forcaDoNome(b.orderNumber))[0];
 }
 
 export async function handlePenteFino(req, res) {
@@ -46,11 +66,12 @@ export async function handlePenteFino(req, res) {
     duplicataPorNota: [],
     duplicataPorRastreio: [],
     rastreioDivergente: [],
+    rastreioFaltando: [],
     faltandoNoQuadro: [],
     eventoAtrasado: [],
     semFonteNenhuma: [],
   };
-  const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0 };
+  const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0, criados: 0 };
 
   const quadro = listOrders();
 
@@ -104,10 +125,15 @@ export async function handlePenteFino(req, res) {
       conferidosNoBling++;
 
       const rastreioBling = dados?.trackingCode || null;
-      const noQuadro = getOrder(numero);
+      // Pelo canonico, nao pelo numero cru: um pedido absorvido por outro
+      // quadrado continua no quadro, so que sob outro nome. Sem isto, toda
+      // mesclagem bem-sucedida seria denunciada aqui como pedido sumido.
+      const canonico = resolverCanonico(numero);
+      const noQuadro = getOrder(canonico);
 
       if (!noQuadro) {
-        // Pedido que ja tem rastreio ou nota deveria ter quadrado.
+        // Pedido que ja tem rastreio ou nota deveria ter quadrado. Pedido sem
+        // nenhum dos dois ainda nao virou entrega -- nao e ausencia, e cedo.
         if (rastreioBling || detalhe?.notaFiscal?.id) {
           achados.faltandoNoQuadro.push({
             pedido: numero,
@@ -115,21 +141,48 @@ export async function handlePenteFino(req, res) {
             rastreio: rastreioBling,
             temNota: !!detalhe?.notaFiscal?.id,
           });
+          // Criar o que falta e seguro: acrescenta quadrado, nao mexe em nenhum.
+          if (corrigir) {
+            upsertOrder({
+              orderNumber: numero,
+              customer: dados?.cliente || undefined,
+              city: dados?.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
+              trackingCode: rastreioBling || undefined,
+              placedAt: dados?.data || undefined,
+              previsaoEntrega: detalhe?.dataPrevista || undefined,
+              temNota: !!detalhe?.notaFiscal?.id,
+            });
+            corrigidos.criados++;
+          }
         }
         continue;
       }
 
-      if (rastreioBling && noQuadro.trackingCode && rastreioBling !== noQuadro.trackingCode) {
-        achados.rastreioDivergente.push({
-          pedido: numero,
-          noQuadro: noQuadro.trackingCode,
-          noBling: rastreioBling,
-        });
-        // O Bling e a fonte do codigo: e ele quem fala com a transportadora.
+      // Quadro sem codigo e Bling com codigo: preencher e sempre ganho.
+      if (rastreioBling && !noQuadro.trackingCode) {
+        achados.rastreioFaltando.push({ pedido: canonico, noBling: rastreioBling });
         if (corrigir) {
-          upsertOrder({ orderNumber: numero, trackingCode: rastreioBling });
+          upsertOrder({ orderNumber: canonico, trackingCode: rastreioBling });
           corrigidos.rastreiosAtualizados++;
         }
+        continue;
+      }
+
+      // Os dois tem codigo, e sao diferentes: SO REPORTA, nunca troca.
+      //
+      // O caso que ensinou isso e o pedido 1453. O quadro tinha
+      // "MEL47975051107FMDOF01", que e codigo de rastreio de verdade do
+      // Mercado Envios, e o Bling tinha "4Y4A5GUKFRJKPO4K3YGNYQNSZY", que e
+      // identificador interno do Mercado Livre e nao rastreia nada. "O Bling e
+      // a fonte" parecia obvio e teria apagado o unico codigo util que o
+      // pedido tinha. Divergencia de codigo e coisa pra olho humano.
+      if (rastreioBling && noQuadro.trackingCode && rastreioBling !== noQuadro.trackingCode) {
+        achados.rastreioDivergente.push({
+          pedido: canonico,
+          noQuadro: noQuadro.trackingCode,
+          noBling: rastreioBling,
+          nota: "conferir a mao -- o quadro nao troca codigo sozinho",
+        });
       }
     }
   } catch (err) {
@@ -164,23 +217,44 @@ export async function handlePenteFino(req, res) {
       }
       conferidosNaMandae++;
       const evento = latestEvent(tracking);
-      if (!evento?.description) continue;
-      if (evento.description === o.carrierStatus) continue;
+      if (!evento) continue;
+
+      // Comparar pelo MESMO criterio com que o dado foi gravado.
+      //
+      // A primeira versao disto comparava `evento.description` cru contra o
+      // carrierStatus e acusou 120 divergencias em 120 pedidos conferidos --
+      // ou seja, nenhuma. O quadro nunca guardou a description: guarda o
+      // `label` de mapMandaeEvent(), que prefere o `name` do evento. Duas
+      // grandezas diferentes comparadas de igual para igual dao 100% de
+      // divergencia, que e a assinatura de um alarme falso, nao de um problema.
+      const mapeado = mapMandaeEvent(evento);
+      const quando = evento.timestamp || evento.date || null;
+      const agendada = coletaPrevista(tracking) || null;
+
+      const mudou =
+        mapeado.label !== o.carrierStatus ||
+        mapeado.status !== o.carrierSeverity ||
+        (quando && quando !== o.lastEventAt) ||
+        agendada !== (o.coletaPrevista || null);
+      if (!mudou) continue;
 
       achados.eventoAtrasado.push({
         pedido: o.orderNumber,
         rastreio: o.trackingCode,
         noQuadro: o.carrierStatus || "(nenhum)",
-        naMandae: evento.description,
-        quando: evento.occurredAt || null,
+        naMandae: mapeado.label,
+        quando,
       });
       if (corrigir) {
         upsertOrder({
           orderNumber: o.orderNumber,
-          carrierStatus: evento.description,
-          carrierSeverity: mapMandaeEvent(evento.description),
-          coletaPrevista: coletaPrevista(tracking) || undefined,
-          lastEventAt: evento.occurredAt || undefined,
+          carrierStatus: mapeado.label,
+          carrierSeverity: mapeado.status,
+          coletaPrevista: agendada,
+          // Nunca "agora": o relogio do envelhecimento conta a partir do evento
+          // de verdade. Carimbar a hora da varredura zeraria o contador de todo
+          // pedido parado -- e o parado e o motivo de o quadro existir.
+          lastEventAt: quando || undefined,
         });
         corrigidos.eventosPuxados++;
       }
@@ -198,6 +272,7 @@ export async function handlePenteFino(req, res) {
       duplicataPorNota: achados.duplicataPorNota.length,
       duplicataPorRastreio: achados.duplicataPorRastreio.length,
       rastreioDivergente: achados.rastreioDivergente.length,
+      rastreioFaltando: achados.rastreioFaltando.length,
       faltandoNoQuadro: achados.faltandoNoQuadro.length,
       eventoAtrasado: achados.eventoAtrasado.length,
       semFonteNenhuma: achados.semFonteNenhuma.length,
