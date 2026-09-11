@@ -30,7 +30,7 @@ import {
   objetoDePostagem,
   situacoesDeVenda,
 } from "./integrations/bling.js";
-import { mapTextoDaTransportadora } from "./lib/statusMapping.js";
+import { mapTextoDaTransportadora, ehEventoFinal } from "./lib/statusMapping.js";
 import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
 
 /**
@@ -38,12 +38,61 @@ import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPe
  * referencia). Guarda tambem quais foram consumidas por algum pedido, pra
  * saber no fim quais precisam de quadrado proprio.
  */
-async function lerNotas({ dataDe, dataAte }) {
+/**
+ * Uma remessa ENTREGUE nao muda mais.
+ *
+ * Cada nota custa duas chamadas (detalhe + objeto de postagem) e a API do Bling
+ * anda a ~2,5 por segundo. Com o historico de 30 dias isso virou uma rodada que
+ * passou de meia hora presa so na leitura das notas -- e que nao terminava, o
+ * que por fora e identico a ter morrido.
+ *
+ * Quase tudo nesse historico e entrega concluida de semanas atras: o codigo nao
+ * vai mudar, o status nao vai mudar, a natureza nao vai mudar. Reler tudo isso
+ * a cada duas horas e gastar o orcamento de chamadas no que ja se sabe, em vez
+ * de gastar no que esta em movimento.
+ */
+function jaSabidoEEncerrado(numeroNota, indice) {
+  const chave = chaveNota(numeroNota);
+  if (!chave) return false;
+  for (const numero of indice.get(chave) || []) {
+    const o = getOrder(numero);
+    if (o?.trackingCode && o?.natureza && ehEventoFinal(o.carrierStatus)) return true;
+  }
+  return false;
+}
+
+async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
   const naturezas = await naturezasDeOperacao();
   const lista = await listarNotas({ dataDe, dataAte });
+  marcar(`${lista.length} notas na listagem`);
   const porId = new Map();
+  // Montado UMA vez: percorrer o quadro inteiro por nota transformaria a
+  // economia de chamadas em desperdicio de CPU.
+  const indiceDeNotas = indicePorNota();
 
+  let lidas = 0;
+  let puladas = 0;
   for (const n of lista) {
+    if (++lidas % 25 === 0) marcar(`nota ${lidas}/${lista.length} (${puladas} ja encerradas)`);
+
+    // Nota de remessa ja entregue e ja conhecida: entra no mapa marcada como
+    // PULADA, sem gastar as duas chamadas.
+    //
+    // Marcada, e nao ausente: se ela sumisse do mapa, o pedido que a referencia
+    // seria lido como "pedido sem nota" -- e ai o codigo de rastreio seria
+    // apagado como autoritativo e o temNota cairia. A economia teria destruido
+    // justamente os quadrados que ja estavam certos.
+    if (jaSabidoEEncerrado(n.numero, indiceDeNotas)) {
+      puladas++;
+      porId.set(String(n.id), {
+        id: String(n.id),
+        numero: String(n.numero ?? "").trim() || null,
+        volumes: [],
+        pular: true,
+        usada: false,
+      });
+      continue;
+    }
     let detalhe = null;
     try {
       detalhe = await detalheNota(n.id);
@@ -70,6 +119,8 @@ async function lerNotas({ dataDe, dataAte }) {
     });
   }
 
+  marcar(`${porId.size} notas detalhadas (${puladas} puladas); lendo objetos de postagem`);
+
   // O RASTREIO E O STATUS vem do objeto de postagem DA NOTA, nunca do pedido.
   //
   // Esta foi a licao do pedido 1234 (Braha Gloiber). Ele exibia
@@ -83,6 +134,7 @@ async function lerNotas({ dataDe, dataAte }) {
   // momento em que a remessa vai pro WMS -- antes dela, o que esta no pedido
   // nao vale como verdade.
   for (const nota of porId.values()) {
+    if (nota.pular) continue;
     for (const idVolume of nota.volumes) {
       const objeto = await objetoDePostagem(idVolume);
       if (!objeto) continue;
@@ -116,7 +168,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const marcar = (etapa) => setMeta("sincronizacaoEtapa", `${etapa} @ ${new Date().toISOString()}`);
 
   marcar("lendo notas");
-  const notas = await lerNotas({ dataDe: inicio, dataAte: hoje });
+  const notas = await lerNotas({ dataDe: inicio, dataAte: hoje, marcar });
 
   marcar(`${notas.size} notas lidas; listando pedidos`);
   const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
@@ -127,7 +179,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const paraMesclarPorNota = [];
 
   const situacoes = await situacoesDeVenda();
-  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, porSituacao: {} };
+  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, porSituacao: {} };
 
   let n = 0;
   for (const resumido of lista) {
@@ -149,12 +201,16 @@ export async function runSyncBling({ dias = 30 } = {}) {
       // O rastreio vem da NOTA, nunca do pedido. Pedido sem nota nao tem
       // rastreio nenhum -- e a etiqueta que ele por acaso carregue e lixo, como
       // provou o "VITPT000242" do pedido 1234.
-      const rastreio = nota?.rastreio || null;
+      // Nota pulada nao opina: o quadrado ja tem o codigo e o status dela, e
+      // `undefined` faz o upsert preservar o que existe.
+      const notaOpina = !!nota && !nota.pular;
+      const rastreio = notaOpina ? nota.rastreio || null : undefined;
 
       // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
       const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
 
       const apelidos = [numeroLoja, nota?.numero, rastreio].filter(Boolean);
+      if (nota?.pular) r.puladas++;
       r.mesclados += mesclarEmCanonico(canonico, apelidos).mesclados;
 
       if (rastreio) r.comRastreio++;
@@ -179,8 +235,8 @@ export async function runSyncBling({ dias = 30 } = {}) {
         trackingCode: rastreio,
         // A nota manda no codigo, inclusive na AUSENCIA dele: e assim que um
         // codigo errado gravado antes (vindo do pedido) sai do quadro em vez de
-        // sobreviver para sempre.
-        trackingCodeAutoritativo: true,
+        // sobreviver para sempre. Nota pulada nao manda em nada.
+        trackingCodeAutoritativo: notaOpina,
         situacaoBling: situacao || undefined,
         placedAt: dados.data || undefined,
         previsaoEntrega: detalhe?.dataPrevista || undefined,
