@@ -97,6 +97,18 @@ export function handleStatus(req, res) {
     // deploy no meio a interrompe.
     ultimaSincronizacaoPedidos: getMeta("lastBlingSyncAt"),
     ultimaSincronizacaoNotas: getMeta("lastNotasSyncAt"),
+    // O desfecho da ultima rodada, pra distinguir "ainda rodando" de "morreu no
+    // meio" sem depender do log do container.
+    sincronizacao: {
+      emCurso: sincronizacaoEmCurso,
+      comecouEm: getMeta("sincronizacaoComecouEm"),
+      terminouEm: getMeta("sincronizacaoTerminouEm"),
+      etapa: getMeta("sincronizacaoEtapa") || null,
+      erro: getMeta("sincronizacaoErro") || null,
+      resultado: (() => {
+        try { return JSON.parse(getMeta("sincronizacaoResultado") || "null"); } catch { return null; }
+      })(),
+    },
     obtidoEm: t.obtidoEm,
     accessTokenValidoAte: new Date(t.expiraEm).toISOString(),
     accessTokenExpirado: Date.now() >= t.expiraEm,
@@ -172,13 +184,28 @@ export async function handleSincronizar(req, res) {
   sincronizacaoEmCurso = true;
   res.json({ ok: true, iniciada: true, dias, acompanhe: "veja os logs do Railway ou /bling/status" });
 
+  // O desfecho vai pro meta, nao so pro log.
+  //
+  // Esta rota responde antes de comecar o trabalho, entao "disparei e nao
+  // aconteceu nada" pode ser sincronizacao lenta, travada ou que estourou no
+  // meio -- e do lado de fora as tres sao identicas. Eu perdi tempo hoje
+  // exatamente nessa duvida: `ultimaSincronizacaoPedidos` nao se mexia e nao
+  // havia como saber se era demora ou erro, porque o log do Railway nao esta ao
+  // meu alcance. Gravar comeco, fim e a mensagem do erro transforma a duvida em
+  // dado.
+  const { setMeta } = await import("../lib/db.js");
+  setMeta("sincronizacaoComecouEm", new Date().toISOString());
+  setMeta("sincronizacaoErro", "");
   try {
     const { runSyncBling } = await import("../sync-bling.js");
-    await runSyncBling({ dias });
+    const r = await runSyncBling({ dias });
+    setMeta("sincronizacaoResultado", JSON.stringify(r));
   } catch (err) {
     console.error("[bling] sincronizacao falhou:", err.message);
+    setMeta("sincronizacaoErro", `${err.message} (em ${new Date().toISOString()})`);
   } finally {
     sincronizacaoEmCurso = false;
+    setMeta("sincronizacaoTerminouEm", new Date().toISOString());
   }
 }
 

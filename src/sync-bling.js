@@ -106,8 +106,19 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const inicio = new Date(hoje.getTime() - dias * 86400000);
 
   console.log(`[bling] sincronizando os ultimos ${dias} dia(s)...`);
+
+  // Marca onde a rodada esta.
+  //
+  // Sem isto, uma sincronizacao que nao termina e indistinguivel de uma que
+  // morreu: por fora so se ve o carimbo final parado. Duas rodadas seguidas
+  // ficaram assim hoje e eu nao tinha como saber se era lentidao ou erro,
+  // porque o log do container nao esta ao meu alcance.
+  const marcar = (etapa) => setMeta("sincronizacaoEtapa", `${etapa} @ ${new Date().toISOString()}`);
+
+  marcar("lendo notas");
   const notas = await lerNotas({ dataDe: inicio, dataAte: hoje });
 
+  marcar(`${notas.size} notas lidas; listando pedidos`);
   const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
   console.log(`[bling] ${lista.length} pedido(s) na listagem.`);
 
@@ -118,8 +129,10 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const situacoes = await situacoesDeVenda();
   const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, porSituacao: {} };
 
+  let n = 0;
   for (const resumido of lista) {
     try {
+      if (++n % 25 === 0) marcar(`pedido ${n}/${lista.length}`);
       const detalhe = await detalhePedido(resumido.id);
       const dados = extrairDoPedido(detalhe);
       if (!dados?.numeroPedido) continue;
@@ -208,6 +221,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
     }
   }
 
+  marcar("notas sem pedido");
   // Notas que nenhum pedido referenciou: remessas que nasceram como nota.
   for (const nota of notas.values()) {
     if (nota.usada || !nota.numero) continue;
