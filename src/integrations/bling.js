@@ -365,6 +365,39 @@ export async function situacoesDeVenda() {
   return mapa;
 }
 
+// ---------------------------------------------------------------------------
+// Situacao da NOTA FISCAL
+// ---------------------------------------------------------------------------
+//
+// A nota tem situacao propria, e ela nao aparece em /situacoes/modulos -- aquilo
+// e o vocabulario dos PEDIDOS. Aqui os codigos sao numeros fixos da API, e eu
+// nao quis confiar em memoria pra traduzi-los. O que decidiu foi o dado:
+//
+//   4  REJEITADA   A Luciene Bento tem tres notas no mesmo dia: 000274 as
+//                  14h41 (situacao 4), 000276 as 14h47 (situacao 4) e 000277
+//                  as 14h48 (situacao 5). Duas rejeicoes e uma reemissao que
+//                  deu certo -- o padrao nao deixa duvida sobre o que e o 4.
+//                  A nota 000054 da Cristiane Simon, que o Luan apontou como
+//                  rejeitada no Bling, tambem e 4.
+//   2  CANCELADA   A nota 001206 e do pedido 1481, que esta cancelado.
+//   5  AUTORIZADA  77 das 100 notas da amostra. A 000046 aparece como
+//                  "Autorizada" no painel do Bling.
+//   6  AUTORIZADA  outras 20 da amostra, na serie 001xxx.
+//
+// Nota rejeitada ou cancelada NUNCA virou remessa. O codigo de etiqueta que ela
+// carrega e lixo -- foi assim que o quadrado "000054" ficou vermelho exibindo
+// VITPT000210, uma etiqueta que a transportadora nunca recebeu porque nunca
+// houve encomenda.
+const NOTA_SEM_VALOR = new Set([2, 4]);
+
+export function notaVale(situacao) {
+  return !NOTA_SEM_VALOR.has(Number(situacao));
+}
+
+export function nomeDaSituacaoDaNota(situacao) {
+  return { 2: "Cancelada", 4: "Rejeitada", 5: "Autorizada", 6: "Autorizada" }[Number(situacao)] || null;
+}
+
 /**
  * Decide se a natureza e de BONIFICACAO/DOACAO (saida sem receita).
  *
