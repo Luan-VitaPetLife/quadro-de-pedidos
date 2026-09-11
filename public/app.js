@@ -477,6 +477,7 @@ function abrirPainel(numero) {
     campo("Nota fiscal", o.notaFiscal, true),
     campo("Tambem conhecido como", (o.apelidos || []).join(", "), true),
     campo("Código de rastreio", o.trackingCode, true),
+    campo("Situação no Bling", o.situacaoBling, true),
     campo("Natureza da operação", o.natureza),
     campo("Pedido feito em", fmtData(o.placedAt), true),
     campo("Coleta prevista", fmtData(o.coletaPrevista), true),

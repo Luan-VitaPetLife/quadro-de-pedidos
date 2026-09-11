@@ -28,7 +28,9 @@ import {
   naturezasDeOperacao,
   ehNaturezaDeBonificacao,
   objetoDePostagem,
+  situacoesDeVenda,
 } from "./integrations/bling.js";
+import { mapTextoDaTransportadora } from "./lib/statusMapping.js";
 import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
 
 /**
@@ -68,6 +70,33 @@ async function lerNotas({ dataDe, dataAte }) {
     });
   }
 
+  // O RASTREIO E O STATUS vem do objeto de postagem DA NOTA, nunca do pedido.
+  //
+  // Esta foi a licao do pedido 1234 (Braha Gloiber). Ele exibia
+  // "VITPT000242", que a Mandae nao conhece, porque o quadro tirava o codigo de
+  // `transporte.volumes[]` do PEDIDO DE VENDA. So que aquele pedido nao tem nota
+  // nenhuma: e uma venda abandonada no Bling, e a etiqueta dela nunca virou
+  // encomenda (objeto com situacao 8, descricao vazia, data 0000-00-00).
+  //
+  // A venda de verdade era o pedido 1215, com a nota 000046 e o rastreio
+  // VITPT000197, entregue em 24/08. Nas palavras do Luan: a NF de saida e o
+  // momento em que a remessa vai pro WMS -- antes dela, o que esta no pedido
+  // nao vale como verdade.
+  for (const nota of porId.values()) {
+    for (const idVolume of nota.volumes) {
+      const objeto = await objetoDePostagem(idVolume);
+      if (!objeto) continue;
+      if (!nota.rastreio && objeto.rastreio) nota.rastreio = objeto.rastreio;
+      // O objeto tambem carrega o estado da entrega, com data -- e para
+      // QUALQUER transportadora, nao so a Mandae.
+      if (objeto.descricao && !nota.entregaDescricao) {
+        nota.entregaDescricao = objeto.descricao;
+        nota.entregaEm = objeto.ultimaAlteracao;
+      }
+      if (objeto.idPedido && !nota.idPedido) nota.idPedido = objeto.idPedido;
+    }
+  }
+
   console.log(`[bling] ${porId.size} nota(s) lida(s).`);
   return porId;
 }
@@ -86,7 +115,8 @@ export async function runSyncBling({ dias = 30 } = {}) {
   // indice ja refletir tudo que foi gravado nesta rodada.
   const paraMesclarPorNota = [];
 
-  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0 };
+  const situacoes = await situacoesDeVenda();
+  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, porSituacao: {} };
 
   for (const resumido of lista) {
     try {
@@ -103,30 +133,26 @@ export async function runSyncBling({ dias = 30 } = {}) {
       const nota = detalhe?.notaFiscal?.id ? notas.get(String(detalhe.notaFiscal.id)) : null;
       if (nota) nota.usada = true;
 
-      // O pedido normalmente traz o rastreio em transporte.volumes[].codigoRastreamento,
-      // mas nem sempre. Quando faltar, o objeto de postagem tem -- e o quadro
-      // nao pode exibir "sem rastreio" para uma remessa que tem um.
-      let rastreio = dados.trackingCode;
-      if (!rastreio) {
-        for (const v of detalhe?.transporte?.volumes || []) {
-          const objeto = await objetoDePostagem(v?.id);
-          if (objeto?.rastreio) {
-            rastreio = objeto.rastreio;
-            break;
-          }
-        }
-      }
+      // O rastreio vem da NOTA, nunca do pedido. Pedido sem nota nao tem
+      // rastreio nenhum -- e a etiqueta que ele por acaso carregue e lixo, como
+      // provou o "VITPT000242" do pedido 1234.
+      const rastreio = nota?.rastreio || null;
+
+      // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
+      const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
 
       const apelidos = [numeroLoja, nota?.numero, rastreio].filter(Boolean);
       r.mesclados += mesclarEmCanonico(canonico, apelidos).mesclados;
 
       if (rastreio) r.comRastreio++;
       if (nota?.bonificacao) r.bonificacoes++;
+      if (situacao) r.porSituacao[situacao] = (r.porSituacao[situacao] || 0) + 1;
 
-      // Merece quadrado se ja existe, se foi despachado (tem rastreio) ou se
-      // ja tem nota emitida. Pedido sem nada disso ainda nao virou entrega.
+      // Merece quadrado se ja existe ou se ja tem nota emitida. Pedido sem nota
+      // ainda nao virou remessa -- e nao basta ele carregar um codigo de
+      // etiqueta, porque essa etiqueta pode nunca ter virado encomenda.
       const jaExiste = !!getOrder(canonico);
-      if (!jaExiste && !rastreio && !nota) {
+      if (!jaExiste && !nota) {
         r.ignorados++;
         continue;
       }
@@ -137,7 +163,12 @@ export async function runSyncBling({ dias = 30 } = {}) {
         customer: dados.cliente || nota?.cliente || undefined,
         brand: (await nomeDaLoja(detalhe?.loja?.id)) || undefined,
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
-        trackingCode: rastreio || undefined,
+        trackingCode: rastreio,
+        // A nota manda no codigo, inclusive na AUSENCIA dele: e assim que um
+        // codigo errado gravado antes (vindo do pedido) sai do quadro em vez de
+        // sobreviver para sempre.
+        trackingCodeAutoritativo: true,
+        situacaoBling: situacao || undefined,
         placedAt: dados.data || undefined,
         previsaoEntrega: detalhe?.dataPrevista || undefined,
         natureza: nota?.natureza || undefined,
@@ -158,6 +189,15 @@ export async function runSyncBling({ dias = 30 } = {}) {
         // A regra de prazo usa isso: pra pedido sem nota, a data prevista e o
         // limite pra emitir a NF, nao a previsao de entrega.
         temNota: !!nota,
+        // Status da entrega direto do Bling. Vale para transportadora que o
+        // quadro nao consulta -- e a primeira noticia que Mercado Livre e
+        // Shopee jamais deram aqui.
+        carrierStatus: nota?.entregaDescricao || undefined,
+        carrierSeverity: nota?.entregaDescricao
+          ? mapTextoDaTransportadora(nota.entregaDescricao).status
+          : undefined,
+        lastEventAt: nota?.entregaEm || undefined,
+        ultimoMovimentoAt: nota?.entregaEm || undefined,
       });
       if (nota?.numero) paraMesclarPorNota.push([canonico, chaveNota(nota.numero)]);
       r.gravados++;
@@ -172,17 +212,8 @@ export async function runSyncBling({ dias = 30 } = {}) {
   for (const nota of notas.values()) {
     if (nota.usada || !nota.numero) continue;
     const jaExiste = !!getOrder(nota.numero);
-    // Sem pedido pra dar o rastreio, busca no OBJETO DE POSTAGEM. E o que tira
-    // esses quadrados do estado "pontilhado, sem informacao nenhuma": a nota so
-    // devolve volumes:[{id}], mas /logisticas/objetos/{id} devolve o codigo.
-    let rastreio = null;
-    for (const idVolume of nota.volumes || []) {
-      const objeto = await objetoDePostagem(idVolume);
-      if (objeto?.rastreio) {
-        rastreio = objeto.rastreio;
-        break;
-      }
-    }
+    // O rastreio e o status ja vieram do objeto de postagem em lerNotas().
+    const rastreio = nota.rastreio || null;
 
     if (!jaExiste && !nota.transportador && !rastreio) continue;
     if (!jaExiste) r.notasSoltas++;
@@ -200,6 +231,12 @@ export async function runSyncBling({ dias = 30 } = {}) {
       canonicoDaNota: true,
       placedAt: nota.emissao || undefined,
       temNota: true,
+      carrierStatus: nota.entregaDescricao || undefined,
+      carrierSeverity: nota.entregaDescricao
+        ? mapTextoDaTransportadora(nota.entregaDescricao).status
+        : undefined,
+      lastEventAt: nota.entregaEm || undefined,
+      ultimoMovimentoAt: nota.entregaEm || undefined,
     });
     paraMesclarPorNota.push([nota.numero, chaveNota(nota.numero)]);
   }
