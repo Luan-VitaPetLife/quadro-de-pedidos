@@ -8,6 +8,9 @@ const state = {
   search: "",
   selectedId: null,
   marcasConhecidas: "",
+  ocultos: 0,
+  vendoOcultos: false,
+  pin: localStorage.getItem("quadroPin") || "",
 };
 
 const palavraStatus = { green: "Seguindo bem", amber: "Precisa de atenção", red: "Com problema" };
@@ -297,6 +300,66 @@ function render() {
   marcarSegmento("filters", "filter", state.filter);
   marcarSegmento("periodos", "periodo", state.periodo);
   montarMarcas(noPeriodo);
+  atualizarBotaoOcultos();
+}
+
+// ---------------------------------------------------------------------------
+// Ocultar um pedido
+// ---------------------------------------------------------------------------
+//
+// Confirmação em diálogo próprio, não em confirm() do navegador: o quadro roda
+// numa TV, e um alerta nativo trava a página inteira até alguém ir lá clicar.
+
+async function chamar(rota, corpo) {
+  const cabecalhos = { "Content-Type": "application/json" };
+  if (state.pin) cabecalhos["X-Quadro-Pin"] = state.pin;
+  const r = await fetch(rota, { method: "POST", headers: cabecalhos, body: JSON.stringify(corpo) });
+  if (r.status === 401) {
+    const pin = prompt("Este quadro pede um PIN para ocultar pedidos. Qual é?");
+    if (!pin) return null;
+    state.pin = pin;
+    localStorage.setItem("quadroPin", pin);
+    return chamar(rota, corpo);
+  }
+  if (!r.ok) throw new Error(`o quadro recusou (${r.status})`);
+  return r.json();
+}
+
+function confirmarOcultar(o) {
+  const cortina = document.getElementById("ocultarBackdrop");
+  const alvo = document.getElementById("ocultarAlvo");
+  const motivo = document.getElementById("ocultarMotivo");
+  alvo.textContent = o.orderNumber + (o.customer ? ` — ${o.customer}` : "");
+  motivo.value = "";
+  cortina.dataset.pedido = o.orderNumber;
+  cortina.classList.add("open");
+  setTimeout(() => motivo.focus(), 60);
+}
+
+function fecharOcultar() {
+  document.getElementById("ocultarBackdrop").classList.remove("open");
+}
+
+async function ocultarConfirmado() {
+  const cortina = document.getElementById("ocultarBackdrop");
+  const numero = cortina.dataset.pedido;
+  const motivo = document.getElementById("ocultarMotivo").value.trim();
+  fecharOcultar();
+  try {
+    await chamar("/api/ocultar", { orderNumber: numero, motivo: motivo || undefined });
+    await poll();
+  } catch (err) {
+    alert(`Não consegui ocultar o pedido ${numero}: ${err.message}`);
+  }
+}
+
+async function reexibir(numero) {
+  try {
+    await chamar("/api/reexibir", { orderNumber: numero });
+    await poll();
+  } catch (err) {
+    alert(`Não consegui trazer o pedido ${numero} de volta: ${err.message}`);
+  }
 }
 
 function cartao(o) {
@@ -355,6 +418,33 @@ function cartao(o) {
     b.title = "Bonificação ou doação";
     el.appendChild(b);
   }
+
+  // Ocultar: a saída manual para o que nenhuma regra resolve.
+  //
+  // <span> com role="button" e não <button>: o cartão inteiro já é um botão, e
+  // botão dentro de botão é HTML inválido — o navegador desmonta a árvore e o
+  // clique passa a cair no lugar errado.
+  const naGaveta = state.vendoOcultos;
+  if (naGaveta) el.classList.add("esta-oculto");
+
+  const esconder = document.createElement("span");
+  esconder.className = "ocultar";
+  esconder.setAttribute("role", "button");
+  esconder.setAttribute("tabindex", "0");
+  esconder.setAttribute("aria-label",
+    naGaveta ? `Trazer o pedido ${o.orderNumber} de volta ao quadro` : `Ocultar o pedido ${o.orderNumber}`);
+  esconder.title = naGaveta ? "Trazer de volta ao quadro" : "Ocultar este pedido do quadro";
+  esconder.textContent = naGaveta ? "↩" : "×";
+  const agir = (ev) => {
+    ev.stopPropagation(); // senão abre o painel do pedido junto
+    if (naGaveta) reexibir(o.orderNumber);
+    else confirmarOcultar(o);
+  };
+  esconder.addEventListener("click", agir);
+  esconder.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") agir(ev);
+  });
+  el.appendChild(esconder);
 
   el.addEventListener("click", () => abrirPainel(o.orderNumber));
   return el;
@@ -610,8 +700,11 @@ document.addEventListener("keydown", (e) => {
 async function poll() {
   const linha = document.getElementById("syncLine");
   try {
-    const [pedidos, meta] = await Promise.all([fetch("/api/orders"), fetch("/api/meta")]);
-    state.orders = (await pedidos.json()).orders || [];
+    const rota = state.vendoOcultos ? "/api/orders?ocultos=1" : "/api/orders";
+    const [pedidos, meta] = await Promise.all([fetch(rota), fetch("/api/meta")]);
+    const corpo = await pedidos.json();
+    state.orders = corpo.orders || [];
+    state.ocultos = corpo.ocultos || 0;
     const { lastSyncAt } = await meta.json();
     render();
     if (state.selectedId) abrirPainel(state.selectedId);
@@ -648,3 +741,38 @@ render();
 document.fonts?.ready.then(moverTodosIndicadores);
 poll();
 setInterval(poll, POLL_MS);
+
+
+// ---------------------------------------------------------------------------
+// Gaveta dos ocultos
+// ---------------------------------------------------------------------------
+const ocultosBtn = document.getElementById("ocultosBtn");
+
+function atualizarBotaoOcultos() {
+  if (state.vendoOcultos) {
+    ocultosBtn.hidden = false;
+    ocultosBtn.textContent = "Voltar ao quadro";
+    ocultosBtn.dataset.active = "true";
+    return;
+  }
+  // Sem nada oculto o botão não existe: um controle permanentemente zerado é
+  // ruído em cima de uma tela que precisa ser lida de longe.
+  ocultosBtn.hidden = state.ocultos === 0;
+  ocultosBtn.textContent = `Ocultos (${state.ocultos})`;
+  delete ocultosBtn.dataset.active;
+}
+
+ocultosBtn.addEventListener("click", async () => {
+  state.vendoOcultos = !state.vendoOcultos;
+  await poll();
+});
+
+document.getElementById("ocultarFechar").addEventListener("click", fecharOcultar);
+document.getElementById("ocultarCancelar").addEventListener("click", fecharOcultar);
+document.getElementById("ocultarConfirmar").addEventListener("click", ocultarConfirmado);
+document.getElementById("ocultarBackdrop").addEventListener("click", (ev) => {
+  if (ev.target.id === "ocultarBackdrop") fecharOcultar();
+});
+document.getElementById("ocultarMotivo").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") ocultarConfirmado();
+});
