@@ -604,3 +604,73 @@ body.tv .board-topo { display: none; }
 :root {
   --icone-relogio: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 3-6.7L3 8'/%3E%3Cpath d='M3 3v5h5'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E");
 }
+
+/* ---------------------------------------------------------------------------
+   Ocultar um pedido
+   ---------------------------------------------------------------------------
+   O × fica discreto até alguém se aproximar do cartão: o quadro é lido de
+   longe, numa TV, e um botão de ação em cada quadrado competiria com a única
+   coisa que precisa ser vista de longe, que é a cor. */
+.sq .ocultar {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity .14s ease, background .14s ease;
+  cursor: pointer;
+}
+.sq:hover .ocultar,
+.sq .ocultar:focus-visible { opacity: .62; }
+.sq .ocultar:hover { opacity: 1; background: rgba(0, 0, 0, .16); }
+.sq .ocultar:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+
+/* Na TV ninguém clica: o botão sairia do caminho de qualquer jeito, mas
+   escondê-lo evita que um toque acidental na tela oculte um pedido. */
+body[data-tamanho="tv"] .sq .ocultar { display: none; }
+
+.painel.confirmar { max-width: 420px; }
+.painel.confirmar .alvo {
+  font-weight: 600;
+  font-size: 15px;
+  margin: 2px 0 10px;
+}
+.painel.confirmar .rotulo-campo {
+  display: block;
+  font-size: 12px;
+  color: var(--tinta-fraca);
+  margin: 14px 0 5px;
+}
+.painel.confirmar input[type="text"] {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--borda);
+  background: var(--fundo);
+  color: var(--tinta);
+  font: inherit;
+  font-size: 14px;
+}
+.acoes-confirmar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.btn.primario {
+  background: var(--tinta);
+  color: var(--fundo);
+  border-color: var(--tinta);
+}
+.btn.primario:hover { opacity: .88; }
+
+/* Quadrado que está na gaveta dos ocultos: fica esmaecido e ganha o botão de
+   trazer de volta no lugar do de ocultar. */
+.sq.esta-oculto { opacity: .58; }
+.sq.esta-oculto .ocultar { opacity: .62; font-size: 12px; }

@@ -116,6 +116,23 @@ if (!existingCols.includes("ultimo_movimento_at")) db.exec("ALTER TABLE orders A
 // sabem disso: cancelamento acontece no ERP, e so o ERP conta.
 if (!existingCols.includes("situacao_bling")) db.exec("ALTER TABLE orders ADD COLUMN situacao_bling TEXT");
 
+// Ocultar: a decisao humana sobre o que o sistema nao consegue decidir.
+//
+// Existe caso que nenhuma regra resolve bem. Uma encomenda extraviada tem como
+// ultimo registro o proprio extravio e nunca mais recebe nada -- refaz-se o
+// pedido e o quadrado antigo ficaria vermelho para sempre, sem que isso
+// signifique algo a fazer. Um pedido abandonado no ERP, idem.
+//
+// Tentar adivinhar esses casos foi o que me fez apagar 47 quadrados numa
+// rodada e ressuscitar outro na seguinte. Quem sabe se aquele extravio ja virou
+// pedido novo e a pessoa que trabalha ali, nao uma heuristica. Entao o sistema
+// para de tentar e oferece a alavanca.
+//
+// Guarda a DATA em vez de um sim/nao porque "quando foi escondido" e a unica
+// coisa que permite conferir depois se a decisao ainda faz sentido.
+if (!existingCols.includes("oculto_em")) db.exec("ALTER TABLE orders ADD COLUMN oculto_em TEXT");
+if (!existingCols.includes("oculto_motivo")) db.exec("ALTER TABLE orders ADD COLUMN oculto_motivo TEXT");
+
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
 function rowToOrder(r) {
@@ -244,6 +261,9 @@ function rowToOrder(r) {
     diasAtePrevisao: previsao.diasAtePrevisao,
     semAcompanhamento: naoAcompanhado,
     situacaoBling: r.situacao_bling || null,
+    oculto: !!r.oculto_em,
+    ocultoEm: r.oculto_em || null,
+    ocultoMotivo: r.oculto_motivo || null,
     // Pedido cancelado ou entregue nao tem proximo passo. O quadro mostra a
     // cor certa, mas ele nao deve voltar todo dia como pendencia de outro dia:
     // nao ha nada a resolver, e a pendencia que nunca sai ensina a ignorar o
@@ -547,9 +567,35 @@ export function upsertOrder(partial) {
   return merged;
 }
 
-export function listOrders() {
+/**
+ * Por padrao devolve TUDO, ocultos inclusive.
+ *
+ * A sincronizacao, a deduplicacao e o pente fino precisam enxergar o quadrado
+ * escondido: se ele sumisse dessas rotinas, o proximo ciclo o criaria de novo
+ * com outro nome e o "ocultar" viraria uma briga sem fim. Quem filtra e a
+ * leitura do quadro, no fim da linha.
+ */
+export function listOrders({ apenasVisiveis = false } = {}) {
   const rows = db.prepare("SELECT * FROM orders ORDER BY last_event_at DESC").all();
-  return rows.map(rowToOrder);
+  const todos = rows.map(rowToOrder);
+  return apenasVisiveis ? todos.filter((o) => !o.oculto) : todos;
+}
+
+/** Tira o quadrado do quadro sem apagar nada: e reversivel e fica registrado. */
+export function ocultarPedido(orderNumber, motivo) {
+  const numero = resolverCanonico(orderNumber);
+  const n = db
+    .prepare("UPDATE orders SET oculto_em = ?, oculto_motivo = ? WHERE order_number = ?")
+    .run(new Date().toISOString(), motivo || null, numero).changes;
+  return n > 0 ? getOrder(numero) : null;
+}
+
+export function reexibirPedido(orderNumber) {
+  const numero = resolverCanonico(orderNumber);
+  const n = db
+    .prepare("UPDATE orders SET oculto_em = NULL, oculto_motivo = NULL WHERE order_number = ?")
+    .run(numero).changes;
+  return n > 0 ? getOrder(numero) : null;
 }
 
 export function setMeta(key, value) {

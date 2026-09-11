@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listOrders, getMeta, dataDir, dataDirSource, db } from "./lib/db.js";
+import { listOrders, getMeta, dataDir, dataDirSource, db, ocultarPedido, reexibirPedido } from "./lib/db.js";
 import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
@@ -30,8 +30,56 @@ app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/api/orders", (req, res) => {
-  res.json({ orders: listOrders() });
+  // O quadro nunca ve os ocultos; `?ocultos=1` e a gaveta pra revisar e trazer
+  // de volta.
+  const todos = listOrders();
+  const ocultos = todos.filter((o) => o.oculto);
+  res.json({
+    orders: req.query?.ocultos === "1" ? ocultos : todos.filter((o) => !o.oculto),
+    ocultos: ocultos.length,
+  });
 });
+
+// ---------------------------------------------------------------------------
+// Ocultar e trazer de volta
+// ---------------------------------------------------------------------------
+//
+// Quem decide aqui e a pessoa, nao o sistema: extravio que ja virou pedido
+// novo, venda abandonada no ERP, qualquer quadrado que ficaria vermelho pra
+// sempre sem nada a fazer. Nada e apagado -- o registro continua no banco,
+// continua sendo atualizado pelas sincronizacoes, e volta ao quadro na hora em
+// que alguem pedir.
+//
+// PIN opcional: com QUADRO_PIN definido, ocultar e reexibir passam a exigi-lo.
+// Sem a variavel, funciona aberto -- do mesmo jeito que o quadro inteiro, que
+// esta no ar sem senha por decisao sua.
+function pinOk(req) {
+  const esperado = process.env.QUADRO_PIN;
+  if (!esperado) return true;
+  return String(req.get("X-Quadro-Pin") || req.query?.pin || "") === esperado;
+}
+
+app.post("/api/ocultar", express.json(), (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ error: "pin invalido" });
+  const numero = String(req.body?.orderNumber || "").trim();
+  if (!numero) return res.status(400).json({ error: "informe orderNumber" });
+  const o = ocultarPedido(numero, req.body?.motivo);
+  if (!o) return res.status(404).json({ error: "pedido nao encontrado" });
+  console.log(`[quadro] pedido ${numero} ocultado${req.body?.motivo ? ` (${req.body.motivo})` : ""}.`);
+  res.json({ ok: true, pedido: o });
+});
+
+app.post("/api/reexibir", express.json(), (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ error: "pin invalido" });
+  const numero = String(req.body?.orderNumber || "").trim();
+  if (!numero) return res.status(400).json({ error: "informe orderNumber" });
+  const o = reexibirPedido(numero);
+  if (!o) return res.status(404).json({ error: "pedido nao encontrado" });
+  console.log(`[quadro] pedido ${numero} trazido de volta ao quadro.`);
+  res.json({ ok: true, pedido: o });
+});
+
+app.get("/api/pin-exigido", (req, res) => res.json({ exigido: !!process.env.QUADRO_PIN }));
 
 app.get("/api/meta", (req, res) => {
   res.json({ lastSyncAt: getMeta("lastSyncAt") });

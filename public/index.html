@@ -70,6 +70,10 @@
         <span class="rotulo">Loja</span>
         <div class="segmentado rolavel" id="brandFilters"></div>
       </div>
+
+      <div class="grupo">
+        <button class="btn" id="ocultosBtn" type="button" hidden>Ocultos</button>
+      </div>
     </div>
 
     <section class="board" id="board">
@@ -144,6 +148,29 @@
 
       <p class="dica">As preferências ficam salvas neste navegador. <kbd>Esc</kbd> sai da tela cheia.</p>
       <button class="btn largo" id="configPadrao" type="button">Restaurar padrão</button>
+    </div>
+  </div>
+
+  <!-- Confirmação de ocultar. Diálogo próprio, não confirm() do navegador:
+       numa TV um alerta nativo trava a página até alguém ir lá clicar. -->
+  <div class="cortina" id="ocultarBackdrop">
+    <div class="painel confirmar" role="dialog" aria-labelledby="ocultarTitulo">
+      <div class="ph">
+        <h2 id="ocultarTitulo">Ocultar do quadro</h2>
+        <button class="fechar" id="ocultarFechar" aria-label="Fechar">&times;</button>
+      </div>
+      <p class="alvo" id="ocultarAlvo"></p>
+      <p class="dica">
+        O pedido sai do quadro, mas nada é apagado: ele continua no banco, continua
+        sendo atualizado pelas sincronizações e pode voltar a qualquer momento pelo
+        botão <strong>Ocultos</strong>.
+      </p>
+      <label class="rotulo-campo" for="ocultarMotivo">Motivo (opcional, ajuda quem revisar depois)</label>
+      <input type="text" id="ocultarMotivo" placeholder="ex.: extravio, pedido já refeito">
+      <div class="acoes-confirmar">
+        <button class="btn" id="ocultarCancelar" type="button">Cancelar</button>
+        <button class="btn primario" id="ocultarConfirmar" type="button">Ocultar</button>
+      </div>
     </div>
   </div>
 
