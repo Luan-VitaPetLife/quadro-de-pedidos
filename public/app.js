@@ -454,6 +454,13 @@ function abrirPainel(numero) {
       "Saiu por transportadora que o quadro não consulta — só a Mandaê tem integração. Não virão mais eventos por aqui.";
     painel.appendChild(n);
   }
+  if (o.entregaNaoConfirmada) {
+    const n = document.createElement("div");
+    n.className = "motivo neutro";
+    n.textContent =
+      "Saiu para entrega e a transportadora não registrou mais nada. Sem ocorrência aberta, isso costuma ser entrega que não foi bipada — não um extravio.";
+    painel.appendChild(n);
+  }
   if (o.rastreioDesconhecido) {
     const n = document.createElement("div");
     n.className = "motivo neutro";

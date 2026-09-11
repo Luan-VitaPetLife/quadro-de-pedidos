@@ -226,6 +226,34 @@ export function ehEventoFinal(texto) {
   return FINAL_PATTERNS.some((re) => re.test(t));
 }
 
+// ---------------------------------------------------------------------------
+// O ultimo trecho
+// ---------------------------------------------------------------------------
+//
+// "Encomenda em rota final" e "saiu para entrega" sao a ultima leitura que
+// muitas transportadoras fazem: o pacote entra na van e o proximo registro
+// seria a entrega -- que frequentemente ninguem bipa.
+//
+// O pedido 1180 mostrou o problema. Ultimo evento: "em rota final", 27/08. Nada
+// depois. O quadro envelheceu e pintou de VERMELHO uma encomenda que a propria
+// Mandae exibe como entregue (a barra de progresso dela fecha e marca "Entregue
+// Qui, 27 Ago"). Procurei esse estado na API -- oito endpoints, `/v3` e `/v2` --
+// e ele nao existe: a API so devolve eventos. A barra e conclusao da interface
+// deles, e chegamos nela pelo mesmo caminho.
+//
+// Silencio depois do ultimo trecho e a assinatura de entrega nao bipada, nao de
+// extravio. Mas isso SO vale enquanto ninguem reclamou: se depois do ultimo
+// trecho veio uma ocorrencia, alguem esta procurando a encomenda, e ai o
+// silencio volta a ser grave. E o que separa o 1180 do 1239 -- mesmo evento
+// final, historias opostas.
+const ULTIMO_TRECHO = [/rota final/, /saiu para entrega/];
+
+export function ehUltimoTrecho(texto) {
+  if (!texto) return false;
+  const t = normalizar(texto);
+  return ULTIMO_TRECHO.some((re) => re.test(t));
+}
+
 /**
  * O WMS tambem tem um "fim da linha", e ele nao e a entrega.
  *
@@ -344,10 +372,18 @@ export function limitesDeEnvelhecimento() {
  *
  * @returns {{status, diasParados, motivo: string|null}}
  */
-export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento, wmsStatus, agora = new Date() }) {
+export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento, wmsStatus, semNoticiaPosterior = true, agora = new Date() }) {
   const semMudanca = { status, diasParados: 0, motivo: null };
   if (!lastEventAt) return semMudanca;
   if (ehEventoFinal(rotuloUltimoEvento)) return semMudanca; // entregue: fim da linha
+
+  // Ultimo trecho e ninguem reclamou depois: entrega que nao foi bipada.
+  // `semNoticiaPosterior` e falso quando existe evento mais novo que o ultimo
+  // movimento -- tipicamente uma ocorrencia, ou seja, alguem procurando a
+  // encomenda. Ai nao ha entrega a presumir.
+  if (ehUltimoTrecho(rotuloUltimoEvento) && semNoticiaPosterior) {
+    return { status, diasParados: diasUteisDesde(lastEventAt, agora), motivo: null };
+  }
 
   // Expedido pelo armazem e sem nenhuma noticia da transportadora: o WMS
   // cumpriu o papel dele e nao tem mais o que registrar. Quem manda no relogio

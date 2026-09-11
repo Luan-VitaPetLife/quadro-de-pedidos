@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento, avaliarRastreioDesconhecido, corDaSituacao, ehSituacaoFinal } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento, avaliarRastreioDesconhecido, corDaSituacao, ehSituacaoFinal, ehUltimoTrecho } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -181,6 +181,11 @@ function rowToOrder(r) {
         lastEventAt: r.ultimo_movimento_at || r.last_event_at,
         rotuloUltimoEvento: r.carrier_status,
         wmsStatus: r.wms_status,
+        // Houve noticia DEPOIS do ultimo movimento? Se houve, foi conversa
+        // (ocorrencia), e conversa depois do ultimo trecho quer dizer que
+        // alguem esta atras da encomenda.
+        semNoticiaPosterior:
+          !r.ultimo_movimento_at || !r.last_event_at || r.last_event_at <= r.ultimo_movimento_at,
       });
 
   // Segunda regra de leitura: o prazo prometido. O envelhecimento pega o
@@ -241,6 +246,12 @@ function rowToOrder(r) {
     situacaoBling: r.situacao_bling || null,
     aguardandoPrimeiroEvento:
       esperandoPrimeiro && r.rastreio_desconhecido !== 1 && !situacaoEncerra,
+    // Ultimo trecho ha dias, sem ocorrencia nenhuma: o painel explica que a
+    // entrega e provavel mas nao foi confirmada por ninguem.
+    entregaNaoConfirmada:
+      ehUltimoTrecho(r.carrier_status) &&
+      (!r.last_event_at || !r.ultimo_movimento_at || r.last_event_at <= r.ultimo_movimento_at) &&
+      envelhecido.diasParados >= 2,
     rastreioDesconhecido: r.rastreio_desconhecido === 1,
     ultimoMovimentoAt: r.ultimo_movimento_at || null,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
