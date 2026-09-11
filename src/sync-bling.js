@@ -218,21 +218,28 @@ export async function runSyncBling({ dias = 30 } = {}) {
       // O rastreio vem da NOTA, nunca do pedido. Pedido sem nota nao tem
       // rastreio nenhum -- e a etiqueta que ele por acaso carregue e lixo, como
       // provou o "VITPT000242" do pedido 1234.
-      // Quem opina sobre o codigo de rastreio, e quem nao opina.
+      // Quem opina sobre o codigo de rastreio.
       //
-      // Tres casos, e a primeira versao disto errava o terceiro:
+      //   nota lida e valida   opina: o codigo dela vale
+      //   nota rejeitada       opina: o codigo certo e NENHUM, porque essa
+      //                        remessa nao aconteceu
+      //   nota pulada          nao opina -- o quadrado ja tem o dado dela
+      //   nota fora da janela  nao opina -- nao ter a nota em maos nao e a
+      //                        mesma coisa que a nota dizer que nao ha codigo
+      //   pedido sem nota      nao opina -- ver abaixo
       //
-      //   nota lida    opina, e o codigo dela vale
-      //   nota pulada  NAO opina -- o quadrado ja tem o codigo e o status dela,
-      //                e `undefined` faz o upsert preservar o que existe
-      //   sem nota     opina, e o codigo certo e NENHUM
+      // O "pedido sem nota" ja foi autoritativo, e apagou 47 quadrados numa
+      // rodada so. Entre eles o 1470 e o 1161: um pedido do Mercado Livre feito
+      // hoje, cuja etiqueta nasce antes da nota, e um da Shopee cuja nota estava
+      // fora da janela de 30 dias. Os dois sao envios de verdade.
       //
-      // O terceiro e o motivo da regra existir: o pedido 1234 nao tem nota e
-      // carrega "VITPT000242", uma etiqueta que nunca virou encomenda. Ao
-      // escrever a economia de chamadas eu troquei `!!nota && !nota.pular`, que
-      // tambem faz "sem nota" nao opinar -- e o codigo morto sobreviveu a
-      // sincronizacao inteira.
-      const notaOpina = !nota || !nota.pular;
+      // Confundi duas coisas diferentes. "Nao tenho a nota" nao autoriza ninguem
+      // a afirmar que nao existe codigo -- so a nota em maos autoriza isso. O
+      // caso que me levou ate aqui (o "VITPT000242" do pedido 1234, etiqueta que
+      // nunca virou encomenda) ja e coberto por outra regra, a que compara o
+      // codigo com o que a transportadora conhece: o quadrado fica vermelho
+      // dizendo exatamente isso, em vez de sumir sem explicacao.
+      const notaOpina = !!notaBruta && !notaBruta.pular;
       const rastreio = notaOpina ? nota?.rastreio || null : undefined;
 
       // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
@@ -246,11 +253,17 @@ export async function runSyncBling({ dias = 30 } = {}) {
       if (nota?.bonificacao) r.bonificacoes++;
       if (situacao) r.porSituacao[situacao] = (r.porSituacao[situacao] || 0) + 1;
 
-      // Merece quadrado se ja existe ou se ja tem nota emitida. Pedido sem nota
-      // ainda nao virou remessa -- e nao basta ele carregar um codigo de
-      // etiqueta, porque essa etiqueta pode nunca ter virado encomenda.
+      // Merece quadrado se ja existe, se tem nota, ou se tem etiqueta despachada
+      // pelo marketplace.
+      //
+      // O terceiro caso volta por pedido do Luan: Mercado Livre e Shopee ficam
+      // parados em pedido de venda antes da nota, e a data prevista dali e o
+      // prazo pra emitir a NF. Ele quer ver justamente esses -- o problema nao e
+      // estarem parados, e ultrapassarem o prazo estando parados. Sem o
+      // quadrado, nao ha onde a regra de prazo aparecer.
       const jaExiste = !!getOrder(canonico);
-      if (!jaExiste && !nota) {
+      const etiquetaDoPedido = detalhe?.transporte?.volumes?.find((v) => v?.codigoRastreamento)?.codigoRastreamento || null;
+      if (!jaExiste && !nota && !etiquetaDoPedido) {
         r.ignorados++;
         continue;
       }
@@ -261,7 +274,10 @@ export async function runSyncBling({ dias = 30 } = {}) {
         customer: dados.cliente || nota?.cliente || undefined,
         brand: (await nomeDaLoja(detalhe?.loja?.id)) || undefined,
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
-        trackingCode: rastreio,
+        // Sem nota em maos, a etiqueta do pedido serve de provisoria: melhor um
+        // codigo a conferir do que um quadrado mudo. A regra de rastreio
+        // desconhecido diz depois se ele vale alguma coisa.
+        trackingCode: notaOpina ? rastreio : rastreio ?? etiquetaDoPedido ?? undefined,
         // A nota manda no codigo, inclusive na AUSENCIA dele: e assim que um
         // codigo errado gravado antes (vindo do pedido) sai do quadro em vez de
         // sobreviver para sempre. Nota pulada nao manda em nada.
