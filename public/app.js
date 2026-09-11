@@ -454,6 +454,13 @@ function abrirPainel(numero) {
       "Saiu por transportadora que o quadro não consulta — só a Mandaê tem integração. Não virão mais eventos por aqui.";
     painel.appendChild(n);
   }
+  if (o.aguardandoPrimeiroEvento) {
+    const n = document.createElement("div");
+    n.className = "motivo neutro";
+    n.textContent =
+      "Nota emitida e etiqueta criada. O primeiro evento da transportadora ainda não chegou — normal até a coleta passar.";
+    painel.appendChild(n);
+  }
 
   painel.append(
     campo("Cliente", o.customer),
