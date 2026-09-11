@@ -217,6 +217,10 @@ function dentroDaFaixa(o, faixa) {
 // não tem nada a cobrar; trazê-lo de volta seria encher a tela com o que já
 // deu certo.
 function ehPendencia(o) {
+  // Cancelado e entregue nao sao pendencia: a cor conta o que aconteceu, mas
+  // nao ha proximo passo. Sem esta excecao eles voltariam ao quadro todo dia,
+  // para sempre -- e pendencia que nunca sai ensina a ignorar o quadro.
+  if (o.encerrado) return false;
   return o.status !== "green";
 }
 

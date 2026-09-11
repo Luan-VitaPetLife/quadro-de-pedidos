@@ -244,6 +244,11 @@ function rowToOrder(r) {
     diasAtePrevisao: previsao.diasAtePrevisao,
     semAcompanhamento: naoAcompanhado,
     situacaoBling: r.situacao_bling || null,
+    // Pedido cancelado ou entregue nao tem proximo passo. O quadro mostra a
+    // cor certa, mas ele nao deve voltar todo dia como pendencia de outro dia:
+    // nao ha nada a resolver, e a pendencia que nunca sai ensina a ignorar o
+    // quadro.
+    encerrado: situacaoEncerra,
     aguardandoPrimeiroEvento:
       esperandoPrimeiro && r.rastreio_desconhecido !== 1 && !situacaoEncerra,
     // Ultimo trecho ha dias, sem ocorrencia nenhuma: o painel explica que a
