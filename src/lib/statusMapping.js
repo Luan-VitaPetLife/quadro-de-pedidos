@@ -191,6 +191,89 @@ export function ehStatusWmsFinal(status) {
   return WMS_FINAL.some((re) => re.test(s));
 }
 
+// ---------------------------------------------------------------------------
+// Eventos que NAO sao movimento
+// ---------------------------------------------------------------------------
+//
+// A Mandae registra no mesmo historico duas coisas diferentes: a encomenda
+// andando ("Encomenda em rota") e a conversa sobre a encomenda ("Ocorrencia
+// respondida: recebemos sua resposta"). As duas carimbam hora, mas so uma
+// significa que o pacote se moveu.
+//
+// O pedido 1239 mostrou o estrago: parou em rota no dia 27/08, teve a
+// ocorrencia respondida em 11/09, e o quadro dizia "0 dias parados" sobre uma
+// encomenda parada ha duas semanas. Pior que nao avisar: o evento burocratico
+// zerava o relogio toda vez que alguem respondia um e-mail.
+const NAO_E_MOVIMENTO = [
+  /ocorrencia/,          // aberta, respondida, em analise -- conversa, nao trajeto
+  /nenhuma atualiza/,    // o evento-fantasma que carrega a coleta agendada
+  /aguardando resposta/,
+  /solicitac/,           // solicitacao de reenvio, de cancelamento...
+];
+
+export function ehMovimento(texto) {
+  if (!texto) return false;
+  const t = normalizar(texto);
+  return !NAO_E_MOVIMENTO.some((re) => re.test(t));
+}
+
+/**
+ * A data do ultimo evento que representa a encomenda ANDANDO.
+ *
+ * Recebe o historico inteiro (a reconsulta da Mandae tem acesso a ele) e devolve
+ * o carimbo do evento de movimento mais recente. Sem nenhum, devolve null --
+ * quem chamar decide o que fazer, porque "nunca se moveu" e uma afirmacao forte
+ * demais pra este modulo tomar sozinho.
+ */
+export function ultimoMovimento(eventos = []) {
+  const movimentos = eventos
+    .filter((e) => ehMovimento([e?.name, e?.description].filter(Boolean).join(" ")))
+    .map((e) => e?.timestamp || e?.date)
+    .filter(Boolean)
+    .sort();
+  return movimentos.length ? movimentos[movimentos.length - 1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Etiqueta que a transportadora nunca recebeu
+// ---------------------------------------------------------------------------
+//
+// O Bling cria a etiqueta e devolve o codigo na hora; a Mandae so passa a
+// conhecer esse codigo quando a encomenda entra no sistema dela. Nos primeiros
+// dias o 404 e o funcionamento normal -- foi assim com o pedido 1479, faturado
+// hoje de manha.
+//
+// Passada a janela, 404 quer dizer outra coisa: a etiqueta foi impressa e a
+// encomenda nunca saiu. O quadro tinha seis desses, de 19/08 a 01/09, e tres
+// apareciam em VERDE -- que e o pior resultado possivel, porque o verde afirma
+// que esta tudo bem com um envio que nao existe.
+//
+// O relogio conta da DATA DO PEDIDO, nao do ultimo evento: nao ha evento nenhum
+// pra contar, essa e exatamente a questao.
+export function avaliarRastreioDesconhecido({ rastreioDesconhecido, placedAt, agora = new Date() }) {
+  const inalterado = { pendente: false, status: null, motivo: null };
+  if (!rastreioDesconhecido || !placedAt) return inalterado;
+
+  const dias = diasUteisDesde(placedAt, agora);
+  const { aviso, problema } = limitesDeEnvelhecimento();
+
+  if (dias >= problema) {
+    return {
+      pendente: true,
+      status: "red",
+      motivo: `Etiqueta criada ha ${dias} dias uteis e a transportadora nunca recebeu esta encomenda`,
+    };
+  }
+  if (dias >= aviso) {
+    return {
+      pendente: true,
+      status: "amber",
+      motivo: `Etiqueta criada ha ${dias} dias uteis e a transportadora ainda nao recebeu a encomenda`,
+    };
+  }
+  return inalterado;
+}
+
 export function limitesDeEnvelhecimento() {
   return {
     aviso: Number(process.env.DIAS_UTEIS_AVISO || 5),
@@ -221,11 +304,15 @@ export function aplicarEnvelhecimento({ status, lastEventAt, rotuloUltimoEvento,
   const diasParados = diasUteisDesde(lastEventAt, agora);
   const { aviso, problema } = limitesDeEnvelhecimento();
 
+  // "sem se mover" e nao "sem evento novo": desde que o relogio conta do ultimo
+  // MOVIMENTO, pode existir evento recente (uma ocorrencia respondida) sem que
+  // a encomenda tenha andado. Dizer "sem nenhum evento novo" seria desmentido
+  // pelo proprio painel, que mostra o evento de hoje logo abaixo.
   if (diasParados >= problema) {
-    return { status: "red", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem nenhum evento novo` };
+    return { status: "red", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem se mover` };
   }
   if (diasParados >= aviso) {
-    return { status: "amber", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem nenhum evento novo` };
+    return { status: "amber", diasParados, motivo: `Parado ha ${diasParados} dias uteis sem se mover` };
   }
   return { ...semMudanca, diasParados };
 }

@@ -14,7 +14,7 @@
 
 import "dotenv/config";
 import { fetchTracking, latestEvent, coletaPrevista } from "./integrations/mandae.js";
-import { mapMandaeEvent } from "./lib/statusMapping.js";
+import { mapMandaeEvent, ultimoMovimento } from "./lib/statusMapping.js";
 import { upsertOrder, listOrders, setMeta } from "./lib/db.js";
 
 async function reconcileOneOrder(order) {
@@ -30,10 +30,28 @@ async function reconcileOneOrder(order) {
 
   try {
     const tracking = await fetchTracking(order.trackingCode);
+
+    // 404: a Mandae nao conhece este codigo.
+    //
+    // Isso e NORMAL nos primeiros dias -- a etiqueta nasce no Bling antes de a
+    // encomenda entrar no sistema da transportadora. Vira problema com o tempo,
+    // e quem decide isso e a regra de leitura, que conta da data do pedido.
+    // Aqui so registramos o fato; antes, este caso saia em silencio e o pedido
+    // continuava verde por nao ter noticia nenhuma.
+    if (tracking === null) {
+      if (!order.rastreioDesconhecido) {
+        upsertOrder({ orderNumber: order.orderNumber, rastreioDesconhecido: true });
+      }
+      return;
+    }
+
     const event = latestEvent(tracking);
     if (!event) return;
 
     const mapped = mapMandaeEvent(event);
+    // A encomenda apareceu na Mandae: se estava marcada como desconhecida, nao
+    // esta mais.
+    const movimento = ultimoMovimento(tracking.events || []);
     // Coleta agendada: a Mandae a devolve disfarcada de evento com data futura.
     const agendada = coletaPrevista(tracking);
     const lastEventAt = event.timestamp || event.date || order.lastEventAt;
@@ -48,7 +66,9 @@ async function reconcileOneOrder(order) {
     const mudou =
       lastEventAt !== order.lastEventAt ||
       mapped.status !== order.carrierSeverity ||
-      (agendada || null) !== (order.coletaPrevista || null);
+      (agendada || null) !== (order.coletaPrevista || null) ||
+      (movimento || null) !== (order.ultimoMovimentoAt || null) ||
+      order.rastreioDesconhecido;
     if (!mudou) return;
 
     upsertOrder({
@@ -58,6 +78,11 @@ async function reconcileOneOrder(order) {
       carrierSeverity: mapped.status,
       coletaPrevista: agendada,
       lastEventAt,
+      // O historico inteiro esta aqui, entao este e o unico lugar do sistema
+      // que consegue separar "a encomenda andou" de "alguem respondeu um
+      // e-mail sobre a encomenda".
+      ultimoMovimentoAt: movimento || lastEventAt,
+      rastreioDesconhecido: false,
     });
   } catch (err) {
     console.error(`[sync] falha ao reconciliar ${order.orderNumber} (${order.trackingCode}):`, err.message);

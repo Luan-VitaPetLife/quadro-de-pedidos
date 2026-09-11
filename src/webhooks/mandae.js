@@ -9,7 +9,7 @@
 // em tempo real.
 
 import { upsertOrder } from "../lib/db.js";
-import { mapMandaeEvent } from "../lib/statusMapping.js";
+import { mapMandaeEvent, ultimoMovimento } from "../lib/statusMapping.js";
 import { coletaPrevista } from "../integrations/mandae.js";
 
 /**
@@ -113,6 +113,7 @@ export async function handleItemProcessado(req, res) {
     carrierStatus: "Encomenda expedida pela Mandaê",
     carrierSeverity: "amber",
     lastEventAt: new Date().toISOString(),
+    rastreioDesconhecido: false,
   });
 
   console.log(`[webhook] item processado: pedido ${orderNumber} / rastreio ${body.trackingCode}`);
@@ -154,6 +155,14 @@ export async function handleRastreamento(req, res) {
     carrierSeverity: mapped.status,
     coletaPrevista: agendada,
     lastEventAt: latest?.timestamp || latest?.date || new Date().toISOString(),
+    // O webhook manda o historico junto, entao da pra separar o que foi
+    // movimento do que foi so conversa sobre a encomenda -- mesma distincao que
+    // a reconsulta faz. Sem `||`, e sim `?? undefined`: um historico so de
+    // ocorrencias nao tem movimento nenhum a declarar, e inventar um zeraria o
+    // relogio do pedido parado.
+    ultimoMovimentoAt: ultimoMovimento(events) ?? undefined,
+    // A Mandae falou sobre este codigo, entao ela o conhece.
+    rastreioDesconhecido: false,
   });
 
   console.log(`[webhook] rastreamento: pedido ${orderNumber} -> ${mapped.status} (${mapped.label})`);

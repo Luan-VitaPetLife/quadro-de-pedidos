@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento, avaliarRastreioDesconhecido } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,6 +92,22 @@ if (!existingCols.includes("coleta_prevista")) db.exec("ALTER TABLE orders ADD C
 // Sem guardar, quem procurasse pelo numero do WMS nao acharia mais o pedido.
 if (!existingCols.includes("apelidos")) db.exec("ALTER TABLE orders ADD COLUMN apelidos TEXT");
 
+// Quando a transportadora responde 404 para o codigo: a etiqueta existe no
+// Bling e a Mandae nunca recebeu a encomenda. Nos primeiros dias isso e normal
+// (a etiqueta nasce antes da coleta); depois de uma semana e um envio que nao
+// aconteceu -- e o quadro mostrava seis desses, tres em VERDE.
+if (!existingCols.includes("rastreio_desconhecido")) db.exec("ALTER TABLE orders ADD COLUMN rastreio_desconhecido INTEGER");
+
+// A data do ultimo MOVIMENTO, que nao e a data do ultimo evento.
+//
+// "Ocorrencia respondida" e um evento: entra no historico, carimba a hora. Mas
+// a encomenda nao andou um metro por causa dele. O pedido 1239 parou em rota no
+// dia 27/08, teve a ocorrencia respondida em 11/09, e o envelhecimento -- que
+// contava do ultimo evento -- dizia "0 dias parados" sobre uma encomenda parada
+// ha duas semanas. Separar as duas datas e o que faz o silencio voltar a ser
+// audivel.
+if (!existingCols.includes("ultimo_movimento_at")) db.exec("ALTER TABLE orders ADD COLUMN ultimo_movimento_at TEXT");
+
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
 function rowToOrder(r) {
@@ -141,7 +157,10 @@ function rowToOrder(r) {
     ? { status: "green", diasParados: 0, motivo: null }
     : aplicarEnvelhecimento({
         status: base,
-        lastEventAt: r.last_event_at,
+        // O MOVIMENTO, nao o ultimo evento: responder uma ocorrencia carimba
+        // hora sem a encomenda andar, e contar dali zerava o relogio de um
+        // pedido parado ha semanas.
+        lastEventAt: r.ultimo_movimento_at || r.last_event_at,
         rotuloUltimoEvento: r.carrier_status,
         wmsStatus: r.wms_status,
       });
@@ -170,8 +189,20 @@ function rowToOrder(r) {
     rotuloUltimoEvento: r.carrier_status,
   });
 
-  const statusFinal = coleta.pendente ? coleta.status : pior(envelhecido.status, previsao.status);
-  const motivo = coleta.pendente ? coleta.motivo : previsao.motivo || envelhecido.motivo;
+  // Etiqueta que a transportadora nunca recebeu. Fica por ULTIMO e manda em
+  // tudo -- inclusive na coleta agendada -- porque nao adianta discutir prazo
+  // de um envio que nao existe.
+  const fantasma = avaliarRastreioDesconhecido({
+    rastreioDesconhecido: r.rastreio_desconhecido === 1,
+    placedAt: r.placed_at,
+  });
+
+  let statusFinal = coleta.pendente ? coleta.status : pior(envelhecido.status, previsao.status);
+  let motivo = coleta.pendente ? coleta.motivo : previsao.motivo || envelhecido.motivo;
+  if (fantasma.pendente) {
+    statusFinal = pior(statusFinal, fantasma.status);
+    motivo = fantasma.motivo;
+  }
 
   return {
     orderNumber: r.order_number,
@@ -185,7 +216,9 @@ function rowToOrder(r) {
     motivoStatus: motivo,
     diasAtePrevisao: previsao.diasAtePrevisao,
     semAcompanhamento: naoAcompanhado,
-    aguardandoPrimeiroEvento: esperandoPrimeiro,
+    aguardandoPrimeiroEvento: esperandoPrimeiro && r.rastreio_desconhecido !== 1,
+    rastreioDesconhecido: r.rastreio_desconhecido === 1,
+    ultimoMovimentoAt: r.ultimo_movimento_at || null,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
     wmsStatus: r.wms_status,
     carrierStatus: r.carrier_status,
@@ -223,11 +256,11 @@ const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
     carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal, coleta_prevista, apelidos,
-    tracking_code, city, placed_at, last_event_at, updated_at
+    tracking_code, city, placed_at, last_event_at, rastreio_desconhecido, ultimo_movimento_at, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
     @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal, @coletaPrevista, @apelidos,
-    @trackingCode, @city, @placedAt, @lastEventAt, @updatedAt
+    @trackingCode, @city, @placedAt, @lastEventAt, @rastreioDesconhecido, @ultimoMovimentoAt, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
     brand = excluded.brand,
@@ -248,6 +281,8 @@ const upsertStmt = db.prepare(`
     city = excluded.city,
     placed_at = excluded.placed_at,
     last_event_at = excluded.last_event_at,
+    rastreio_desconhecido = excluded.rastreio_desconhecido,
+    ultimo_movimento_at = excluded.ultimo_movimento_at,
     updated_at = excluded.updated_at
 `);
 
@@ -427,8 +462,24 @@ export function upsertOrder(partial) {
     trackingCode: existing.trackingCode ?? partial.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
     placedAt: partial.placedAt ?? existing.placedAt ?? null,
-    lastEventAt: partial.lastEventAt ?? existing.lastEventAt ?? new Date().toISOString(),
+    rastreioDesconhecido:
+      partial.rastreioDesconhecido !== undefined
+        ? (partial.rastreioDesconhecido ? 1 : 0)
+        : (existing.rastreioDesconhecido ? 1 : 0),
+    // Quando um pedido nasce no quadro sem evento nenhum, o relogio comeca na
+    // DATA DO PEDIDO, nao na hora em que o quadro soube dele.
+    //
+    // Sem isto, um pedido de 19/08 descoberto hoje aparecia como "1 dia util
+    // sem novidade" -- o quadro media a propria memoria em vez da idade do
+    // pedido, e um pedido esquecido ha tres semanas passava por recem-chegado.
+    lastEventAt:
+      partial.lastEventAt ?? existing.lastEventAt ?? partial.placedAt ?? new Date().toISOString(),
   };
+
+  // O movimento acompanha o evento, a menos que quem gravou saiba distinguir os
+  // dois (a reconsulta da Mandae sabe: ela ve o historico inteiro).
+  merged.ultimoMovimentoAt =
+    partial.ultimoMovimentoAt ?? existing.ultimoMovimentoAt ?? merged.lastEventAt;
 
   // status: quem chamar pode forcar um valor (partial.status); por padrao
   // recalculamos a partir do pior entre wmsSeverity e carrierSeverity.
