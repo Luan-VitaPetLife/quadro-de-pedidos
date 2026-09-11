@@ -454,6 +454,13 @@ function abrirPainel(numero) {
       "Saiu por transportadora que o quadro não consulta — só a Mandaê tem integração. Não virão mais eventos por aqui.";
     painel.appendChild(n);
   }
+  if (o.rastreioDesconhecido) {
+    const n = document.createElement("div");
+    n.className = "motivo neutro";
+    n.textContent =
+      "A transportadora não conhece este código de rastreio. A etiqueta foi criada no Bling, mas a encomenda nunca entrou no sistema dela.";
+    painel.appendChild(n);
+  }
   if (o.aguardandoPrimeiroEvento) {
     const n = document.createElement("div");
     n.className = "motivo neutro";
@@ -474,6 +481,7 @@ function abrirPainel(numero) {
     campo("Pedido feito em", fmtData(o.placedAt), true),
     campo("Coleta prevista", fmtData(o.coletaPrevista), true),
     campo("Prazo para emitir a nota", fmtDia(o.previsaoEntrega), true),
+    campo("Último movimento", fmtData(o.ultimoMovimentoAt), true),
     campo("Última atualização", fmtData(o.lastEventAt), true),
     campo("Dias úteis sem novidade", o.diasParados ?? "—", true)
   );

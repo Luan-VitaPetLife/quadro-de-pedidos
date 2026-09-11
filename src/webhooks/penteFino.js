@@ -30,11 +30,12 @@ export async function handlePenteFino(req, res) {
     duplicataPorRastreio: [],
     rastreioDivergente: [],
     rastreioFaltando: [],
+    rastreioDesconhecido: [],
     faltandoNoQuadro: [],
     eventoAtrasado: [],
     semFonteNenhuma: [],
   };
-  const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0, criados: 0 };
+  const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0, criados: 0, marcadosDesconhecidos: 0 };
 
   const quadro = listOrders();
 
@@ -149,7 +150,7 @@ export async function handlePenteFino(req, res) {
   let conferidosNaMandae = 0;
   try {
     const { fetchTracking, latestEvent, coletaPrevista } = await import("../integrations/mandae.js");
-    const { mapMandaeEvent } = await import("../lib/statusMapping.js");
+    const { mapMandaeEvent, ultimoMovimento } = await import("../lib/statusMapping.js");
     const prefixo = (process.env.MANDAE_PREFIXO_RASTREIO || "VITPT").toUpperCase();
 
     const candidatos = listOrders()
@@ -162,9 +163,27 @@ export async function handlePenteFino(req, res) {
       try {
         tracking = await fetchTracking(o.trackingCode);
       } catch {
-        continue; // rastreio que a Mandae ainda nao conhece nao e divergencia
+        continue; // falha de rede ou da API: nao afirma nada sobre o pedido
       }
       conferidosNaMandae++;
+
+      // 404: a Mandae nunca recebeu esta encomenda. Nos primeiros dias e o
+      // normal; a regra de leitura e que decide quando isso vira problema,
+      // contando da data do pedido.
+      if (tracking === null) {
+        if (!o.rastreioDesconhecido) {
+          achados.rastreioDesconhecido.push({
+            pedido: o.orderNumber,
+            rastreio: o.trackingCode,
+            pedidoFeitoEm: o.placedAt || null,
+          });
+          if (corrigir) {
+            upsertOrder({ orderNumber: o.orderNumber, rastreioDesconhecido: true });
+            corrigidos.marcadosDesconhecidos++;
+          }
+        }
+        continue;
+      }
       const evento = latestEvent(tracking);
       if (!evento) continue;
 
@@ -200,6 +219,8 @@ export async function handlePenteFino(req, res) {
           carrierStatus: mapeado.label,
           carrierSeverity: mapeado.status,
           coletaPrevista: agendada,
+          ultimoMovimentoAt: ultimoMovimento(tracking.events || []) ?? undefined,
+          rastreioDesconhecido: false,
           // Nunca "agora": o relogio do envelhecimento conta a partir do evento
           // de verdade. Carimbar a hora da varredura zeraria o contador de todo
           // pedido parado -- e o parado e o motivo de o quadro existir.
@@ -222,6 +243,7 @@ export async function handlePenteFino(req, res) {
       duplicataPorRastreio: achados.duplicataPorRastreio.length,
       rastreioDivergente: achados.rastreioDivergente.length,
       rastreioFaltando: achados.rastreioFaltando.length,
+      rastreioDesconhecido: achados.rastreioDesconhecido.length,
       faltandoNoQuadro: achados.faltandoNoQuadro.length,
       eventoAtrasado: achados.eventoAtrasado.length,
       semFonteNenhuma: achados.semFonteNenhuma.length,
