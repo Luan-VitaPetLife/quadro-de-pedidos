@@ -66,6 +66,20 @@ export function startScheduler() {
     // como se nada se soubesse dele.
     await rodarBling();
     await runSync().catch((err) => console.error("[scheduler] erro na sincronizacao:", err));
+
+    // Por ultimo, o quadro olhando pra si mesmo: dois quadrados que dividem a
+    // mesma nota ou o mesmo codigo de rastreio sao a mesma remessa, e isso se
+    // decide sem consultar ninguem. Fica no fim porque as duas etapas acima
+    // acabaram de trazer justamente as chaves que revelam a duplicata.
+    try {
+      const { deduplicar } = await import("./lib/deduplicar.js");
+      const d = deduplicar({ aplicar: true });
+      if (d.mesclados) {
+        console.log(`[scheduler] ${d.mesclados} quadrado(s) duplicado(s) fundido(s).`);
+      }
+    } catch (err) {
+      console.error("[scheduler] erro ao deduplicar:", err.message);
+    }
   }
 
   // Roda uma vez ao subir, sem travar o boot do servidor.
