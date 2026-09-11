@@ -328,6 +328,34 @@ export async function naturezasDeOperacao() {
   return mapa;
 }
 
+// ---------------------------------------------------------------------------
+// Situacoes do pedido de venda
+// ---------------------------------------------------------------------------
+//
+// O quadro lia tudo do pedido MENOS se ele ainda esta de pe. O pedido 1481 da
+// Andressa estava CANCELADO no Bling e aparecia verde -- o quadro afirmando que
+// esta tudo bem com uma venda que nao existe mais.
+//
+// A lista nao esta escrita aqui de proposito: alem das situacoes de fabrica, a
+// conta tem situacoes proprias ("Aguardando Coleta", "Em devolucao") que so o
+// Bling conhece. Perguntar e mais barato que manter uma copia desatualizada.
+//
+// 98310 e o modulo "Vendas" (Pedidos de Venda) nesta conta.
+let situacoesCache = null;
+
+export async function situacoesDeVenda() {
+  if (situacoesCache) return situacoesCache;
+  const mapa = {};
+  try {
+    const dados = await blingFetch("/situacoes/modulos/98310", { limite: 100 });
+    for (const s of dados?.data || []) mapa[String(s.id)] = s.nome || "";
+  } catch (err) {
+    console.warn(`[bling] nao consegui listar as situacoes de venda: ${err.message}`);
+  }
+  situacoesCache = mapa;
+  return mapa;
+}
+
 /**
  * Decide se a natureza e de BONIFICACAO/DOACAO (saida sem receita).
  *
@@ -372,8 +400,25 @@ export async function objetoDePostagem(idVolume) {
     const dados = await blingFetch(`/logisticas/objetos/${encodeURIComponent(idVolume)}`);
     const o = dados?.data;
     if (!o) return null;
+    // O objeto de postagem nao guarda so o codigo: guarda o ESTADO da entrega,
+    // com data. E a unica fonte de status que vale para TODAS as
+    // transportadoras -- inclusive Mercado Livre e Shopee, que o quadro tratava
+    // como "sem acompanhamento" por nao ter integracao propria. Amostra real:
+    // "UF57UJY7WNKSLBSWYDCAZUM7T4 -> A transportadora ja informou sobre a
+    // chegada do item".
+    //
+    // `situacao` 8 com descricao vazia e data "0000-00-00" e etiqueta criada
+    // sem nada ter acontecido -- devolvemos a descricao como null, porque
+    // string vazia aqui viraria um rotulo em branco no painel.
+    const r = o?.rastreamento || {};
+    const alteracao = r.ultimaAlteracao && !String(r.ultimaAlteracao).startsWith("0000")
+      ? String(r.ultimaAlteracao).replace(" ", "T")
+      : null;
     return {
-      rastreio: o?.rastreamento?.codigo || null,
+      rastreio: r.codigo || null,
+      descricao: r.descricao || null,
+      situacao: r.situacao ?? null,
+      ultimaAlteracao: alteracao,
       servico: o?.servico?.nome || null,
       idPedido: o?.pedidoVenda?.id ?? null,
       idNota: o?.notaFiscal?.id ?? null,

@@ -78,6 +78,11 @@ const GREEN_PATTERNS = [
   /em rota/,               // em deslocamento (RED e checado antes, entao
                            // "em rota de devolucao" continua vermelho)
   /encaminhada/,           // seguiu para a proxima etapa
+  // Vocabulario do objeto de postagem do Bling, que descreve as
+  // transportadoras que nao tem integracao propria aqui (Mercado Livre,
+  // Shopee). Lido de uma amostra de 59 objetos reais, nao da documentacao.
+  /informou sobre a chegada/, // ML avisando que o item chegou a unidade
+  /divergencia resolvida/,    // houve um problema e ele FOI resolvido
 ];
 
 function matchesAny(patterns, text) {
@@ -101,6 +106,56 @@ export function mapMandaeEvent(event) {
 
   // O label guarda o texto ORIGINAL (acentuado), que e o que a pessoa le no painel.
   return { status, label: event.name || event.description };
+}
+
+/**
+ * O mesmo vocabulario, vindo em texto solto em vez de evento.
+ *
+ * O objeto de postagem do Bling descreve a entrega com as MESMAS frases que a
+ * Mandae usa ("Encomenda em rota", "Entrega realizada") -- verificado numa
+ * amostra de 59 objetos reais. Entao a regra de cor e uma so; muda a porta de
+ * entrada.
+ */
+export function mapTextoDaTransportadora(texto) {
+  if (!texto) return { status: "amber", label: null };
+  return mapMandaeEvent({ name: texto });
+}
+
+/**
+ * A cor que uma situacao do Bling significa, ou null quando ela nao opina.
+ *
+ * So tres situacoes dizem algo que as outras fontes nao dizem melhor:
+ *
+ *   Cancelado    a venda acabou. Nao ha entrega a esperar, e qualquer outra
+ *                cor seria mentira.
+ *   Em devolucao a mercadoria esta voltando -- alguem precisa tratar.
+ *   Entregue     o Bling confirma o fim feliz.
+ *
+ * "Em aberto", "Atendido", "Aguardando Coleta" e companhia descrevem o meio do
+ * caminho, e sobre o meio do caminho quem sabe mais e o WMS e a transportadora.
+ * Opinar aqui sobre elas seria sobrescrever dado melhor com dado pior.
+ */
+export function corDaSituacao(nome) {
+  const n = String(nome || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+  if (!n) return null;
+  if (/cancel/.test(n)) return "red";
+  if (/devoluc/.test(n)) return "amber";
+  if (/entregue|completado/.test(n)) return "green";
+  return null;
+}
+
+/** Situacoes que encerram a vida do pedido: depois delas o silencio e esperado. */
+export function ehSituacaoFinal(nome) {
+  const n = String(nome || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+  return /cancel|entregue|completado/.test(n);
 }
 
 // Status vindos do WMS (FontesLog).

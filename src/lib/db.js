@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento, avaliarRastreioDesconhecido } from "./statusMapping.js";
+import { combineStatus, aplicarEnvelhecimento, avaliarPrevisao, pior, semAcompanhamento, avaliarColeta, combinarComHandover, aguardandoPrimeiroEvento, avaliarRastreioDesconhecido, corDaSituacao, ehSituacaoFinal } from "./statusMapping.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,6 +108,14 @@ if (!existingCols.includes("rastreio_desconhecido")) db.exec("ALTER TABLE orders
 // audivel.
 if (!existingCols.includes("ultimo_movimento_at")) db.exec("ALTER TABLE orders ADD COLUMN ultimo_movimento_at TEXT");
 
+// A situacao do pedido no Bling ("Cancelado", "Em devolucao", "Entregue").
+//
+// O quadro lia do pedido tudo MENOS se ele ainda estava de pe. O pedido 1481 da
+// Andressa estava cancelado e aparecia verde -- o quadro afirmando que esta
+// tudo bem com uma venda que nao existe mais. Nem o WMS nem a transportadora
+// sabem disso: cancelamento acontece no ERP, e so o ERP conta.
+if (!existingCols.includes("situacao_bling")) db.exec("ALTER TABLE orders ADD COLUMN situacao_bling TEXT");
+
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
 function rowToOrder(r) {
@@ -125,6 +133,14 @@ function rowToOrder(r) {
   // Despacho por transportadora que nao consultamos: sabe-se que saiu, e so.
   // Nao envelhece nem entra em regra de prazo -- nao ha fonte que possa
   // desmentir ou confirmar.
+  // A situacao do pedido no ERP.
+  //
+  // Fica acima de tudo porque responde uma pergunta anterior a todas as outras:
+  // esta venda ainda existe? Cancelamento nao aparece no WMS nem na
+  // transportadora -- acontece no Bling, e so o Bling conta.
+  const doBling = corDaSituacao(r.situacao_bling);
+  const situacaoEncerra = ehSituacaoFinal(r.situacao_bling);
+
   const naoAcompanhado = semAcompanhamento({
     trackingCode: r.tracking_code,
     wmsStatus: r.wms_status,
@@ -155,6 +171,8 @@ function rowToOrder(r) {
 
   const envelhecido = naoAcompanhado
     ? { status: "green", diasParados: 0, motivo: null }
+    : situacaoEncerra
+    ? { status: base, diasParados: 0, motivo: null }
     : aplicarEnvelhecimento({
         status: base,
         // O MOVIMENTO, nao o ultimo evento: responder uma ocorrencia carimba
@@ -203,6 +221,10 @@ function rowToOrder(r) {
     statusFinal = pior(statusFinal, fantasma.status);
     motivo = fantasma.motivo;
   }
+  if (doBling) {
+    statusFinal = pior(statusFinal, doBling);
+    if (doBling !== "green") motivo = `Pedido ${String(r.situacao_bling).toLowerCase()} no Bling`;
+  }
 
   return {
     orderNumber: r.order_number,
@@ -216,7 +238,9 @@ function rowToOrder(r) {
     motivoStatus: motivo,
     diasAtePrevisao: previsao.diasAtePrevisao,
     semAcompanhamento: naoAcompanhado,
-    aguardandoPrimeiroEvento: esperandoPrimeiro && r.rastreio_desconhecido !== 1,
+    situacaoBling: r.situacao_bling || null,
+    aguardandoPrimeiroEvento:
+      esperandoPrimeiro && r.rastreio_desconhecido !== 1 && !situacaoEncerra,
     rastreioDesconhecido: r.rastreio_desconhecido === 1,
     ultimoMovimentoAt: r.ultimo_movimento_at || null,
     // *_status: texto legivel (label) vindo da fonte -- so para exibicao.
@@ -256,11 +280,11 @@ const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
     carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal, coleta_prevista, apelidos,
-    tracking_code, city, placed_at, last_event_at, rastreio_desconhecido, ultimo_movimento_at, updated_at
+    tracking_code, city, placed_at, last_event_at, rastreio_desconhecido, ultimo_movimento_at, situacao_bling, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
     @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal, @coletaPrevista, @apelidos,
-    @trackingCode, @city, @placedAt, @lastEventAt, @rastreioDesconhecido, @ultimoMovimentoAt, @updatedAt
+    @trackingCode, @city, @placedAt, @lastEventAt, @rastreioDesconhecido, @ultimoMovimentoAt, @situacaoBling, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
     brand = excluded.brand,
@@ -283,6 +307,7 @@ const upsertStmt = db.prepare(`
     last_event_at = excluded.last_event_at,
     rastreio_desconhecido = excluded.rastreio_desconhecido,
     ultimo_movimento_at = excluded.ultimo_movimento_at,
+    situacao_bling = excluded.situacao_bling,
     updated_at = excluded.updated_at
 `);
 
@@ -459,9 +484,16 @@ export function upsertOrder(partial) {
     // integracao gravando identificador por cima de codigo bom e corriqueiro.
     // Na duvida, o quadro fica com o que ja tinha e o pente fino reporta a
     // divergencia pra alguem olhar.
-    trackingCode: existing.trackingCode ?? partial.trackingCode ?? null,
+    // `trackingCodeAutoritativo` e a NOTA falando: so ela sabe o codigo de
+    // verdade, inclusive quando o codigo certo e "nenhum". Sem essa porta, um
+    // codigo errado gravado antes (o "VITPT000242" do pedido 1234) ficaria no
+    // quadro para sempre, porque a regra conservadora abaixo nunca sobrescreve.
+    trackingCode: partial.trackingCodeAutoritativo
+      ? partial.trackingCode ?? null
+      : existing.trackingCode ?? partial.trackingCode ?? null,
     city: partial.city ?? existing.city ?? null,
     placedAt: partial.placedAt ?? existing.placedAt ?? null,
+    situacaoBling: partial.situacaoBling ?? existing.situacaoBling ?? null,
     rastreioDesconhecido:
       partial.rastreioDesconhecido !== undefined
         ? (partial.rastreioDesconhecido ? 1 : 0)
