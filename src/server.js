@@ -104,7 +104,7 @@ app.post("/api/reconstruir", async (req, res) => {
   }
   if (reconstrucaoEmCurso) return res.status(409).json({ error: "ja existe uma reconstrucao em andamento" });
 
-  const dias = Number(req.query?.dias) || 30;
+  const dias = Number(req.query?.dias) || 60;
   reconstrucaoEmCurso = true;
   res.json({ ok: true, iniciada: true, dias, acompanhe: "/bling/status" });
 

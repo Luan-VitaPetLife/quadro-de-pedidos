@@ -19,7 +19,7 @@ const CORES = { green: "VERDE", amber: "AMARELO", red: "VERMELHO" };
 async function main() {
   const args = process.argv.slice(2);
   const seco = args.includes("--seco");
-  const dias = Number(args.find((a) => /^\d+$/.test(a)) || 30);
+  const dias = Number(args.find((a) => /^\d+$/.test(a)) || 60);
 
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - dias * 86400000);

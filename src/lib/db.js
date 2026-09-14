@@ -254,8 +254,21 @@ function rowToOrder(r) {
     placedAt: r.placed_at,
   });
 
-  let statusFinal = coleta.pendente ? coleta.status : pior(envelhecido.status, previsao.status);
-  let motivo = coleta.pendente ? coleta.motivo : previsao.motivo || envelhecido.motivo;
+  // A coleta agendada silencia o alarme -- mas nunca por cima de um VERMELHO
+  // declarado por uma das fontes.
+  //
+  // Ela nasceu pra resolver um caso especifico: entre a expedicao e o primeiro
+  // evento de rastreio, o WMS marca "PARADO" e a Mandae responde "nenhuma
+  // atualizacao", e os dois somados pintavam de amarelo uma encomenda que so
+  // espera o caminhao. Calar esse ruido e certo.
+  //
+  // Calar um armazem dizendo REJEITADA nao e. Quatro pedidos estavam assim,
+  // verdes, com a coleta marcada pra hoje as 16h -- coleta que nao vai
+  // acontecer, justamente porque o armazem recusou a remessa. O agendamento e
+  // uma promessa; a rejeicao e um fato.
+  const coletaPodeCalar = coleta.pendente && base !== "red";
+  let statusFinal = coletaPodeCalar ? coleta.status : pior(envelhecido.status, previsao.status);
+  let motivo = coletaPodeCalar ? coleta.motivo : previsao.motivo || envelhecido.motivo;
   if (fantasma.pendente) {
     statusFinal = pior(statusFinal, fantasma.status);
     motivo = fantasma.motivo;
@@ -263,6 +276,14 @@ function rowToOrder(r) {
   if (doBling) {
     statusFinal = pior(statusFinal, doBling);
     if (doBling !== "green") motivo = `Pedido ${String(r.situacao_bling).toLowerCase()} no Bling`;
+  }
+
+  // Cor sem explicacao e o defeito que mais voltou neste projeto. Quando
+  // nenhuma regra escreveu um motivo, quem responde e a fonte que declarou a
+  // cor -- o rotulo dela ja diz tudo ("REJEITADA", "Extravio total").
+  if (!motivo && statusFinal !== "green") {
+    if (r.wms_severity === statusFinal && r.wms_status) motivo = `Armazem: ${r.wms_status}`;
+    else if (r.carrier_severity === statusFinal && r.carrier_status) motivo = `Transportadora: ${r.carrier_status}`;
   }
 
   return {
