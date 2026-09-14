@@ -23,12 +23,40 @@ const POLL_MS = 60000;
 // Ficam no navegador de quem olha. A TV da operação e o notebook de quem
 // investiga querem coisas diferentes do mesmo quadro: uma quer cartão grande e
 // cor forte a três metros, o outro quer densidade e detalhe.
-const PADRAO = { tema: "auto", tamanho: "m", forma: "arredondado", cor: "media", rastreio: true, cliente: false };
+// Os tres dados que cabem num cartao, e o que cada um responde.
+//
+// `principal` e o que vai na linha grande -- a que se le de longe, da TV. O
+// numero do pedido e o padrao porque e a chave que a operacao digita, mas quem
+// atende cliente pode preferir o nome, e quem so despacha pode preferir o
+// rastreio. Os outros dois viram linhas secundarias, ligaveis a parte.
+const CAMPOS_DO_CARTAO = {
+  numero: { rotulo: "Número do pedido", valor: (o) => o.orderNumber, classe: "num" },
+  cliente: { rotulo: "Nome do cliente", valor: (o) => o.customer, classe: "cli" },
+  rastreio: { rotulo: "Código de rastreio", valor: (o) => o.trackingCode, classe: "rast mono" },
+};
+
+const LEGENDA_PADRAO = {
+  ok: "Seguindo bem",
+  aviso: "Precisa de atenção",
+  erro: "Com problema",
+  tracejado: "Transportadora sem acompanhamento",
+  relogio: "De outro dia, ainda pendente",
+};
+
+const PADRAO = {
+  tema: "auto", tamanho: "m", forma: "arredondado", cor: "media",
+  principal: "numero",
+  rastreio: true, cliente: false, numero: false,
+  legenda: { ...LEGENDA_PADRAO },
+};
 const CHAVE = "quadro.prefs";
 
 function lerPrefs() {
   try {
-    return { ...PADRAO, ...JSON.parse(localStorage.getItem(CHAVE) || "{}") };
+    const salvo = JSON.parse(localStorage.getItem(CHAVE) || "{}");
+    // A legenda e objeto: sem juntar por dentro, uma versao antiga guardada no
+    // navegador apagaria as chaves que nasceram depois.
+    return { ...PADRAO, ...salvo, legenda: { ...LEGENDA_PADRAO, ...(salvo.legenda || {}) } };
   } catch {
     return { ...PADRAO };
   }
@@ -43,6 +71,11 @@ function gravarPrefs(p) {
 }
 
 let prefs = lerPrefs();
+
+const IDS_DA_LEGENDA = {
+  ok: "legOk", aviso: "legAviso", erro: "legErro",
+  tracejado: "legTracejado", relogio: "legRelogio",
+};
 
 const TAMANHOS = {
   p: { largura: 104, altura: 46, num: 11.5, cod: 9, gap: 6 },
@@ -86,6 +119,26 @@ function aplicarPrefs() {
   marcarSegmento("optCor", "cor", prefs.cor);
   document.getElementById("optRastreio").checked = prefs.rastreio;
   document.getElementById("optCliente").checked = prefs.cliente;
+  document.getElementById("optNumero").checked = prefs.numero;
+  marcarSegmento("optPrincipal", "principal", prefs.principal);
+
+  // O campo escolhido como destaque nao pode tambem ser linha secundaria: a
+  // caixa dele fica desligada e sem uso, em vez de aparecer ligavel e nao
+  // fazer nada.
+  for (const chave of ["numero", "cliente", "rastreio"]) {
+    const cx = document.getElementById("opt" + chave[0].toUpperCase() + chave.slice(1));
+    const ehPrincipal = prefs.principal === chave;
+    cx.disabled = ehPrincipal;
+    cx.closest(".opcao").classList.toggle("desativada", ehPrincipal);
+  }
+
+  for (const [chave, id] of Object.entries(IDS_DA_LEGENDA)) {
+    const campo = document.getElementById(id);
+    if (campo && campo !== document.activeElement) campo.value = prefs.legenda[chave] || "";
+  }
+  for (const el of document.querySelectorAll("[data-legenda]")) {
+    el.textContent = prefs.legenda[el.dataset.legenda] || LEGENDA_PADRAO[el.dataset.legenda];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -395,22 +448,22 @@ function cartao(o) {
 
   // textContent, nunca innerHTML: número, cliente e rastreio vêm de webhook,
   // portal e ERP — nenhum deles deveria poder injetar HTML na tela.
-  const num = document.createElement("span");
-  num.className = "num";
-  num.textContent = o.orderNumber;
-  el.appendChild(num);
+  const principal = CAMPOS_DO_CARTAO[prefs.principal] ? prefs.principal : "numero";
+  const grande = document.createElement("span");
+  grande.className = "num";
+  // Se o campo escolhido estiver vazio nesse pedido, o número entra no lugar --
+  // um cartão sem nada escrito não identifica coisa nenhuma.
+  grande.textContent = CAMPOS_DO_CARTAO[principal].valor(o) || o.orderNumber;
+  el.appendChild(grande);
 
-  if (prefs.rastreio && o.trackingCode) {
-    const r = document.createElement("span");
-    r.className = "rast mono";
-    r.textContent = o.trackingCode;
-    el.appendChild(r);
-  }
-  if (prefs.cliente && o.customer) {
-    const c = document.createElement("span");
-    c.className = "cli";
-    c.textContent = o.customer;
-    el.appendChild(c);
+  for (const chave of ["cliente", "rastreio", "numero"]) {
+    if (chave === principal || !prefs[chave]) continue;
+    const valor = CAMPOS_DO_CARTAO[chave].valor(o);
+    if (!valor) continue;
+    const linha = document.createElement("span");
+    linha.className = CAMPOS_DO_CARTAO[chave].classe === "num" ? "rast mono" : CAMPOS_DO_CARTAO[chave].classe;
+    linha.textContent = valor;
+    el.appendChild(linha);
   }
   // Os ícones dividem o cartão em dois lados, e a divisão tem regra: à direita
   // o que o pedido É (bonificação, veio de outro dia), à esquerda o que se pode
@@ -750,6 +803,26 @@ segmento("brandFilters", "brandfilter", (v) => { state.brandFilter = v; render()
 segmento("optTamanho", "tamanho", (v) => { prefs.tamanho = v; gravarPrefs(prefs); aplicarPrefs(); });
 segmento("optForma", "forma", (v) => { prefs.forma = v; gravarPrefs(prefs); aplicarPrefs(); });
 segmento("optCor", "cor", (v) => { prefs.cor = v; gravarPrefs(prefs); aplicarPrefs(); });
+segmento("optPrincipal", "principal", (v) => {
+  prefs.principal = v;
+  // Ligar a linha secundaria do campo que DEIXOU de ser destaque: senao ele
+  // simplesmente some do cartao, e a impressao e de que o dado se perdeu.
+  prefs[v] = false;
+  gravarPrefs(prefs);
+  aplicarPrefs();
+  render();
+});
+
+for (const [chave, id] of Object.entries(IDS_DA_LEGENDA)) {
+  document.getElementById(id).addEventListener("input", (e) => {
+    const texto = e.target.value.trim();
+    prefs.legenda[chave] = texto || LEGENDA_PADRAO[chave];
+    gravarPrefs(prefs);
+    for (const el of document.querySelectorAll(`[data-legenda="${chave}"]`)) {
+      el.textContent = prefs.legenda[chave];
+    }
+  });
+}
 
 document.getElementById("backdrop").addEventListener("click", (e) => {
   if (e.target.id === "backdrop") fecharPainel();
@@ -788,8 +861,13 @@ document.getElementById("optRastreio").addEventListener("change", (e) => {
 document.getElementById("optCliente").addEventListener("change", (e) => {
   prefs.cliente = e.target.checked; gravarPrefs(prefs); render();
 });
+document.getElementById("optNumero").addEventListener("change", (e) => {
+  prefs.numero = e.target.checked; gravarPrefs(prefs); render();
+});
 document.getElementById("configPadrao").addEventListener("click", () => {
-  prefs = { ...PADRAO };
+  // Copia funda na legenda: sem isso o PADRAO seria alterado junto na proxima
+  // edicao, e "restaurar padrao" passaria a restaurar o texto customizado.
+  prefs = { ...PADRAO, legenda: { ...LEGENDA_PADRAO } };
   gravarPrefs(prefs);
   aplicarPrefs();
   render();

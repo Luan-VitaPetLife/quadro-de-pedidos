@@ -751,3 +751,34 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
    trazer de volta no lugar do de ocultar. */
 .sq.esta-oculto { opacity: .58; }
 .sq.esta-oculto .ocultar { opacity: .62; font-size: 12px; }
+
+/* ── Preferências: destaque do cartão e texto da legenda ───────────────── */
+.opcao.desativada { opacity: .45; }
+.opcao.desativada > label { cursor: default; }
+.dica.menor { font-size: 11.5px; margin: 8px 0 0; }
+
+.legenda-campos { display: flex; flex-direction: column; gap: 7px; }
+.legenda-campos .lc { display: flex; align-items: center; gap: 9px; }
+.legenda-campos .lc input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--borda, var(--linha));
+  background: var(--fundo);
+  color: var(--tinta);
+  font: inherit;
+  font-size: 13px;
+}
+.legenda-campos .lc input[type="text"]:focus-visible {
+  outline: 2px solid var(--tinta);
+  outline-offset: 1px;
+}
+/* O relógio na lista de campos usa a mesma máscara do cartão, para a pessoa
+   reconhecer qual linha da legenda está editando. */
+.legenda-campos .lc-relogio {
+  width: 11px; height: 11px; flex: none;
+  background: var(--tinta-fraca);
+  -webkit-mask: var(--icone-relogio) center / contain no-repeat;
+  mask: var(--icone-relogio) center / contain no-repeat;
+}
