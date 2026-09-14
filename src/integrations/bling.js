@@ -206,7 +206,7 @@ async function carregarCanais() {
     const dados = await blingFetch("/canais-venda", { limite: 100, pagina: 1 });
     for (const c of dados?.data || []) {
       const nome = c.descricao || c.nome || c.tipo;
-      if (c.id != null && nome) nomesDeLoja.set(String(c.id), nome);
+      if (c.id != null && nome) nomesDeLoja.set(String(c.id), comTipo(nome, c.tipo));
     }
     console.log(`[bling] ${nomesDeLoja.size} canal(is) de venda carregado(s).`);
   } catch (err) {
@@ -214,15 +214,32 @@ async function carregarCanais() {
   }
 }
 
+/**
+ * Acrescenta a plataforma ao nome do canal, quando ela identifica.
+ *
+ * O Bling devolve `tipo` junto de cada canal ("Shopify", "Shopee",
+ * "MercadoLivre", "TikTok", "LojaFisica"). Duas lojas da operacao sao Shopify e
+ * o nome delas nao diz isso -- "Coco and Luna - Brasil" e "Yucaloo - Brasil"
+ * parecem lojas proprias quaisquer.
+ *
+ * So o Shopify ganha sufixo, e de proposito: "Shopee (Shopee)" nao informa
+ * nada. A regra e acrescentar o que o nome ja nao diz.
+ */
+function comTipo(nome, tipo) {
+  if (String(tipo || "").toLowerCase() !== "shopify") return nome;
+  return /shopify/i.test(nome) ? nome : `${nome} (Shopify)`;
+}
+
 export async function nomeDaLoja(id) {
   if (id == null) return null;
   const chave = String(id);
 
   // Loja 0 nao e uma loja: e o Bling dizendo "esta saida nao veio de canal de
-  // venda nenhum". Na operacao sao as bonificacoes e doacoes, que nascem
-  // direto como nota, sem venda por tras. Imprimir "Loja 0" no filtro fazia o
-  // quadro anunciar uma loja que nao existe.
-  if (chave === "0") return "Sem canal de venda";
+  // venda nenhum". Na operacao sao as bonificacoes e doacoes -- conferi as 54
+  // que estao no quadro e TODAS tem natureza "Saida em bonificacao" -- e elas
+  // nascem direto como nota, sem venda por tras. Imprimir "Loja 0" fazia o
+  // filtro anunciar uma loja que nao existe.
+  if (chave === "0") return "Bonificações";
   await carregarCanais();
   if (nomesDeLoja.has(chave)) return nomesDeLoja.get(chave);
 
