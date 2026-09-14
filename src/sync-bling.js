@@ -166,6 +166,17 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
   return porId;
 }
 
+/** "0000-00-00" e ausencia de data disfarcada de data; o Bling usa muito. */
+function dataValida(texto) {
+  const d = String(texto || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) && !d.startsWith("0000") ? d : null;
+}
+
+function hojeISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export async function runSyncBling({ dias = 30 } = {}) {
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - dias * 86400000);
@@ -253,17 +264,20 @@ export async function runSyncBling({ dias = 30 } = {}) {
       if (nota?.bonificacao) r.bonificacoes++;
       if (situacao) r.porSituacao[situacao] = (r.porSituacao[situacao] || 0) + 1;
 
-      // Merece quadrado se ja existe, se tem nota, ou se tem etiqueta despachada
-      // pelo marketplace.
+      // Quem merece quadrado.
       //
-      // O terceiro caso volta por pedido do Luan: Mercado Livre e Shopee ficam
-      // parados em pedido de venda antes da nota, e a data prevista dali e o
-      // prazo pra emitir a NF. Ele quer ver justamente esses -- o problema nao e
-      // estarem parados, e ultrapassarem o prazo estando parados. Sem o
-      // quadrado, nao ha onde a regra de prazo aparecer.
+      // Com nota: e remessa, entra. Sem nota: so entra depois de ESTOURAR o
+      // prazo de emissao da NF -- resposta do Luan no questionario, "so quando
+      // passar do prazo".
+      //
+      // A versao anterior deixava entrar qualquer pedido com etiqueta, e era
+      // por ali que entravam os quadrados que ele nao reconhecia: venda
+      // abandonada no ERP carrega etiqueta que nunca virou encomenda. Um pedido
+      // de venda ainda nao e uma remessa, e o quadro e de remessas.
       const jaExiste = !!getOrder(canonico);
-      const etiquetaDoPedido = detalhe?.transporte?.volumes?.find((v) => v?.codigoRastreamento)?.codigoRastreamento || null;
-      if (!jaExiste && !nota && !etiquetaDoPedido) {
+      const prazoNota = dataValida(detalhe?.dataPrevista);
+      const prazoEstourado = prazoNota ? prazoNota < hojeISO() : false;
+      if (!jaExiste && !nota && !prazoEstourado) {
         r.ignorados++;
         continue;
       }
@@ -274,10 +288,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
         customer: dados.cliente || nota?.cliente || undefined,
         brand: (await nomeDaLoja(detalhe?.loja?.id)) || undefined,
         city: dados.cidade ? `${dados.cidade}${dados.uf ? " - " + dados.uf : ""}` : undefined,
-        // Sem nota em maos, a etiqueta do pedido serve de provisoria: melhor um
-        // codigo a conferir do que um quadrado mudo. A regra de rastreio
-        // desconhecido diz depois se ele vale alguma coisa.
-        trackingCode: notaOpina ? rastreio : rastreio ?? etiquetaDoPedido ?? undefined,
+        trackingCode: rastreio,
         // A nota manda no codigo, inclusive na AUSENCIA dele: e assim que um
         // codigo errado gravado antes (vindo do pedido) sai do quadro em vez de
         // sobreviver para sempre. Nota pulada nao manda em nada.

@@ -315,7 +315,7 @@ async function chamar(rota, corpo) {
   if (state.pin) cabecalhos["X-Quadro-Pin"] = state.pin;
   const r = await fetch(rota, { method: "POST", headers: cabecalhos, body: JSON.stringify(corpo) });
   if (r.status === 401) {
-    const pin = prompt("Este quadro pede um PIN para ocultar pedidos. Qual é?");
+    const pin = prompt("Este quadro pede um PIN para tirar pedidos do quadro. Qual é?");
     if (!pin) return null;
     state.pin = pin;
     localStorage.setItem("quadroPin", pin);
@@ -349,7 +349,7 @@ async function ocultarConfirmado() {
     await chamar("/api/ocultar", { orderNumber: numero, motivo: motivo || undefined });
     await poll();
   } catch (err) {
-    alert(`Não consegui ocultar o pedido ${numero}: ${err.message}`);
+    alert(`Não consegui marcar o pedido ${numero} como resolvido: ${err.message}`);
   }
 }
 
@@ -432,8 +432,8 @@ function cartao(o) {
   esconder.setAttribute("role", "button");
   esconder.setAttribute("tabindex", "0");
   esconder.setAttribute("aria-label",
-    naGaveta ? `Trazer o pedido ${o.orderNumber} de volta ao quadro` : `Ocultar o pedido ${o.orderNumber}`);
-  esconder.title = naGaveta ? "Trazer de volta ao quadro" : "Ocultar este pedido do quadro";
+    naGaveta ? `Trazer o pedido ${o.orderNumber} de volta ao quadro` : `Marcar o pedido ${o.orderNumber} como resolvido`);
+  esconder.title = naGaveta ? "Trazer de volta ao quadro" : "Marcar como resolvido e tirar do quadro";
   esconder.textContent = naGaveta ? "↩" : "×";
   const agir = (ev) => {
     ev.stopPropagation(); // senão abre o painel do pedido junto
@@ -765,7 +765,7 @@ function atualizarBotaoOcultos() {
   // Sem nada oculto o botão não existe: um controle permanentemente zerado é
   // ruído em cima de uma tela que precisa ser lida de longe.
   ocultosBtn.hidden = state.ocultos === 0;
-  ocultosBtn.textContent = `Ocultos (${state.ocultos})`;
+  ocultosBtn.textContent = `Pedidos resolvidos (${state.ocultos})`;
   delete ocultosBtn.dataset.active;
 }
 

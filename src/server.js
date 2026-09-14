@@ -33,10 +33,15 @@ app.get("/api/orders", (req, res) => {
   // O quadro nunca ve os ocultos; `?ocultos=1` e a gaveta pra revisar e trazer
   // de volta.
   const todos = listOrders();
-  const ocultos = todos.filter((o) => o.oculto);
+  // Duas saidas diferentes do quadro, e so uma delas e revisavel: quem foi
+  // resolvido a mao aparece na gaveta; venda cancelada no Bling simplesmente
+  // nao e mais assunto.
+  const resolvidos = todos.filter((o) => o.oculto && !o.foraDoQuadro);
   res.json({
-    orders: req.query?.ocultos === "1" ? ocultos : todos.filter((o) => !o.oculto),
-    ocultos: ocultos.length,
+    orders: req.query?.ocultos === "1"
+      ? resolvidos
+      : todos.filter((o) => !o.oculto && !o.foraDoQuadro),
+    ocultos: resolvidos.length,
   });
 });
 

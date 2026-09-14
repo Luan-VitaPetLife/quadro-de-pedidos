@@ -333,25 +333,46 @@ export function ultimoMovimento(eventos = []) {
 //
 // O relogio conta da DATA DO PEDIDO, nao do ultimo evento: nao ha evento nenhum
 // pra contar, essa e exatamente a questao.
+/**
+ * Prazos PROPRIOS para a etiqueta que a transportadora nao recebeu.
+ *
+ * Eram os mesmos do envelhecimento (5 e 10 dias uteis), e isso estava errado
+ * por uma ordem de grandeza. Medi 70 envios saudaveis: 54% recebem o primeiro
+ * evento na Mandae no mesmo dia do pedido, 44% no dia util seguinte e 1% no
+ * segundo. Nenhum passou disso.
+ *
+ * Ou seja: uma etiqueta que a Mandae nao conhece depois de dois dias uteis e
+ * uma anomalia quase certa -- e o quadro esperava DEZ dias pra dizer isso.
+ * Esperar o prazo do envelhecimento aqui era confundir "parou de andar" com
+ * "nunca comecou".
+ */
+export function limitesDaEtiqueta() {
+  return {
+    aviso: Number(process.env.DIAS_ETIQUETA_AVISO || 1),
+    problema: Number(process.env.DIAS_ETIQUETA_PROBLEMA || 2),
+  };
+}
+
 export function avaliarRastreioDesconhecido({ rastreioDesconhecido, placedAt, agora = new Date() }) {
   const inalterado = { pendente: false, status: null, motivo: null };
   if (!rastreioDesconhecido || !placedAt) return inalterado;
 
   const dias = diasUteisDesde(placedAt, agora);
-  const { aviso, problema } = limitesDeEnvelhecimento();
+  const { aviso, problema } = limitesDaEtiqueta();
 
+  const tempo = dias === 1 ? "1 dia util" : `${dias} dias uteis`;
   if (dias >= problema) {
     return {
       pendente: true,
       status: "red",
-      motivo: `Etiqueta criada ha ${dias} dias uteis e a transportadora nunca recebeu esta encomenda`,
+      motivo: `Etiqueta criada ha ${tempo} e a transportadora nunca recebeu esta encomenda`,
     };
   }
   if (dias >= aviso) {
     return {
       pendente: true,
       status: "amber",
-      motivo: `Etiqueta criada ha ${dias} dias uteis e a transportadora ainda nao recebeu a encomenda`,
+      motivo: `Etiqueta criada ha ${tempo} e a transportadora ainda nao recebeu a encomenda`,
     };
   }
   return inalterado;

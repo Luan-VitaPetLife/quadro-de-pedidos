@@ -261,6 +261,11 @@ function rowToOrder(r) {
     diasAtePrevisao: previsao.diasAtePrevisao,
     semAcompanhamento: naoAcompanhado,
     situacaoBling: r.situacao_bling || null,
+    // Cancelado no Bling sai do quadro. Resposta do Luan no questionario: a
+    // venda deixou de existir, entao nao ha o que acompanhar -- mostrar em
+    // vermelho so gastaria a atencao de alguem com um caso ja encerrado.
+    // O REGISTRO fica: some da tela, nao do banco, e continua sendo atualizado.
+    foraDoQuadro: /cancel/i.test(String(r.situacao_bling || "")),
     oculto: !!r.oculto_em,
     ocultoEm: r.oculto_em || null,
     ocultoMotivo: r.oculto_motivo || null,
