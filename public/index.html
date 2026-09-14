@@ -63,7 +63,6 @@
           <button class="seg" data-filter="bonificacao">Bonificação</button>
         </div>
 
-        <input class="busca" id="search" type="search" placeholder="Buscar pedido, cliente ou rastreio">
       </div>
 
       <div class="grupo">
@@ -79,6 +78,9 @@
     <section class="board" id="board">
       <div class="board-topo">
         <span class="board-conta" id="boardConta"></span>
+        <!-- A busca mora aqui, e não junto dos filtros: ela age sobre ESTES
+             quadrados, e ficar dentro do card diz isso sem precisar explicar. -->
+        <input class="busca" id="search" type="search" placeholder="Buscar pedido, cliente ou rastreio">
         <button class="btn icone" id="expandirBtn" type="button" title="Expandir para tela cheia" aria-label="Expandir">&#9974;</button>
       </div>
       <div class="grid" id="grid"></div>

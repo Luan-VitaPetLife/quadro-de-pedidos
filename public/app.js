@@ -227,6 +227,20 @@ function ehPendencia(o) {
   return o.status !== "green";
 }
 
+// Pendência volta do PASSADO, nunca do futuro.
+//
+// "Volta pro quadro" só faz sentido para trás: um extravio de terça continua
+// sendo problema na quinta. Um pedido de setembro não tem nada a fazer numa
+// revisão de agosto — ele ainda nem existia no período que se está olhando.
+//
+// A primeira versão comparava só "está fora da faixa", e com isso qualquer
+// pendência aparecia em qualquer período. Filtrando 01/08 a 31/08, entravam os
+// problemas de setembro junto — o mês fechado deixava de ser o mês fechado.
+function ehAnterior(o, faixa) {
+  const d = dataDoPedido(o);
+  return d ? d < faixa[0] : false;
+}
+
 function deOutroDia(o) {
   const faixa = intervalo();
   if (!faixa) return false; // em "Tudo" não existe "outro dia"
@@ -236,7 +250,7 @@ function deOutroDia(o) {
 function dentroDoPeriodo(o) {
   const faixa = intervalo();
   if (!faixa) return true;
-  return dentroDaFaixa(o, faixa) || ehPendencia(o);
+  return dentroDaFaixa(o, faixa) || (ehPendencia(o) && ehAnterior(o, faixa));
 }
 
 

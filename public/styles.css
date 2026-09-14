@@ -258,6 +258,8 @@ body {
 .datas .ate { font-size: 12px; color: var(--tinta-fraca); }
 
 .busca {
+  /* Dentro do cabecalho do card: o `auto` empurra a busca para a direita e o
+     botao de expandir fica no canto, que e onde ele ja estava. */
   margin-left: auto;
   border: 1px solid var(--linha);
   background: var(--painel);
@@ -501,7 +503,8 @@ kbd {
 @media (max-width: 720px) {
   .placar { flex-wrap: wrap; }
   .stat { flex: 1 0 50%; border-left: none; }
-  .busca { margin-left: 0; width: 100%; }
+  .busca { margin-left: 0; width: 100%; min-width: 0; order: 3; }
+  .board-topo .board-conta { flex: 1 1 auto; }
 }
 
 /* Barra própria para o botão de expandir. Sobreposto ao conteúdo ele cobria
@@ -510,8 +513,11 @@ kbd {
 .board-topo {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  /* Sem `space-between`: quem empurra a busca para a direita e o
+     `margin-left: auto` dela, e o botao de expandir vem logo depois. Com
+     space-between e tres itens, a busca ficaria centralizada no meio. */
+  gap: 10px;
   margin-bottom: 14px;
 }
 .board-conta { font-size: 12px; color: var(--tinta-fraca); }
