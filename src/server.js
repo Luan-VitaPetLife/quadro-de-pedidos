@@ -86,6 +86,50 @@ app.post("/api/reexibir", express.json(), (req, res) => {
 
 app.get("/api/pin-exigido", (req, res) => res.json({ exigido: !!process.env.QUADRO_PIN }));
 
+// POST /api/reconstruir?s=<segredo>&confirmar=APAGAR-E-RELER&dias=30
+//
+// Apaga o quadro e le tudo de novo. Existe como rota porque o banco de verdade
+// mora num volume do Railway, fora do alcance de quem roda o script na propria
+// maquina.
+//
+// Exige a palavra por extenso alem do segredo: o segredo ja abre todas as
+// outras rotas, e esta e a unica que apaga. Uma URL a mais no historico do
+// navegador nao deveria poder zerar o quadro.
+let reconstrucaoEmCurso = false;
+app.post("/api/reconstruir", async (req, res) => {
+  const esperado = process.env.MANDAE_WEBHOOK_SECRET;
+  if (esperado && req.query?.s !== esperado) return res.status(401).json({ error: "segredo invalido" });
+  if (req.query?.confirmar !== "APAGAR-E-RELER") {
+    return res.status(400).json({ error: "faltou confirmar=APAGAR-E-RELER" });
+  }
+  if (reconstrucaoEmCurso) return res.status(409).json({ error: "ja existe uma reconstrucao em andamento" });
+
+  const dias = Number(req.query?.dias) || 30;
+  reconstrucaoEmCurso = true;
+  res.json({ ok: true, iniciada: true, dias, acompanhe: "/bling/status" });
+
+  const { setMeta } = await import("./lib/db.js");
+  setMeta("reconstrucaoComecouEm", new Date().toISOString());
+  setMeta("reconstrucaoErro", "");
+  try {
+    const { reconstruirQuadro } = await import("./lib/reconstrucao.js");
+    const { comTravaDeSincronizacao } = await import("./lib/travaDeSincronizacao.js");
+    // Pela mesma trava da sincronizacao: reconstruir enquanto um ciclo grava
+    // seria apagar debaixo dos pes de quem esta escrevendo.
+    const { rodou, resultado } = await comTravaDeSincronizacao(() =>
+      reconstruirQuadro({ dias, aoAndar: (t) => setMeta("reconstrucaoEtapa", `${t} @ ${new Date().toISOString()}`) })
+    );
+    if (!rodou) setMeta("reconstrucaoErro", "havia uma sincronizacao em andamento");
+    else setMeta("reconstrucaoResultado", JSON.stringify(resultado));
+  } catch (err) {
+    console.error("[reconstrucao] falhou:", err.message);
+    setMeta("reconstrucaoErro", `${err.message} (em ${new Date().toISOString()})`);
+  } finally {
+    reconstrucaoEmCurso = false;
+    setMeta("reconstrucaoTerminouEm", new Date().toISOString());
+  }
+});
+
 app.get("/api/meta", (req, res) => {
   res.json({ lastSyncAt: getMeta("lastSyncAt") });
 });
