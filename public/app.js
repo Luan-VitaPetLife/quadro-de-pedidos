@@ -472,9 +472,30 @@ function cartao(o) {
 
 // As lojas vêm do que está no período — senão o filtro oferece loja sem
 // nenhum pedido visível.
+// As lojas que aparecem no filtro, escolhidas pelo Luan no painel do Bling.
+//
+// Lista fechada de proposito. A conta tem 15 canais de venda, a maioria
+// desativada ou substituida -- "Mercado Livre - Paraná" velho, duas lojas TikTok
+// antigas, uma Shopee criada por app. Todos tem pedido antigo no historico,
+// entao montar o filtro a partir do que existe no quadro enchia a barra de
+// lojas que ninguem usa mais.
+//
+// Os nomes sao exatamente a `descricao` do canal no Bling. Se uma loja for
+// renomeada la, o nome muda aqui junto -- e e so acrescentar a linha quando
+// nascer uma loja nova.
+const LOJAS_NO_FILTRO = [
+  "Coco and Luna - Brasil",
+  "Yucaloo - Brasil",
+  "Shopee",
+  "Mercado Livre - SP",
+  "TikTok Shop - Vita Pet Life",
+  "Vita Pet Life - São Paulo",
+];
+
 function montarMarcas(pedidos) {
   const alvo = document.getElementById("brandFilters");
-  const marcas = [...new Set(pedidos.map((o) => o.brand).filter(Boolean))].sort();
+  const presentes = new Set(pedidos.map((o) => o.brand).filter(Boolean));
+  const marcas = LOJAS_NO_FILTRO.filter((m) => presentes.has(m));
   const assinatura = marcas.join("|");
 
   const reconstruiu = assinatura !== state.marcasConhecidas;
