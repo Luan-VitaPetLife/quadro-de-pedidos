@@ -217,6 +217,12 @@ async function carregarCanais() {
 export async function nomeDaLoja(id) {
   if (id == null) return null;
   const chave = String(id);
+
+  // Loja 0 nao e uma loja: e o Bling dizendo "esta saida nao veio de canal de
+  // venda nenhum". Na operacao sao as bonificacoes e doacoes, que nascem
+  // direto como nota, sem venda por tras. Imprimir "Loja 0" no filtro fazia o
+  // quadro anunciar uma loja que nao existe.
+  if (chave === "0") return "Sem canal de venda";
   await carregarCanais();
   if (nomesDeLoja.has(chave)) return nomesDeLoja.get(chave);
 
