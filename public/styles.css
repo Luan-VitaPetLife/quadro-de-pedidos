@@ -435,7 +435,22 @@ kbd {
 @media (min-width: 640px) { .painel { border-radius: var(--raio); } }
 .painel.config { max-width: 480px; }
 
-.painel .ph { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+/* Largo o bastante para duas colunas, e nao mais do que isso: passar disso
+   faria a linha de texto dos avisos ficar longa demais pra ler. */
+#panel { max-width: 780px; }
+
+.painel .ph {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--linha);
+}
+.painel .ph .titulo { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.painel .ph .etiquetas { display: flex; flex-wrap: wrap; gap: 6px; }
+.painel .ph .acoes-ph { display: flex; align-items: center; gap: 10px; flex: none; }
 .painel .ph h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .painel .order-no { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .fechar, .painel .close {
@@ -462,7 +477,8 @@ kbd {
   font-weight: 500;
   padding: 5px 11px;
   border-radius: 20px;
-  margin: 12px 0 14px;
+  margin: 0;
+  white-space: nowrap;
 }
 .selo.green { background: var(--ok-fundo); color: var(--ok); border: 1px solid var(--ok-linha); }
 .selo.amber { background: var(--aviso-fundo); color: var(--aviso); border: 1px solid var(--aviso-linha); }
@@ -481,10 +497,34 @@ kbd {
 }
 .motivo.neutro { border-left-color: var(--neutro); }
 
-.campo { padding: 9px 0; border-top: 1px solid var(--linha); display: flex; gap: 14px; align-items: baseline; }
-.campo:first-of-type { border-top: none; }
-.campo .k { font-size: 12px; color: var(--tinta-fraca); flex: 0 0 42%; }
+.campo { padding: 7px 0; border-top: 1px solid var(--linha); display: flex; gap: 14px; align-items: baseline; }
+.campo:first-child { border-top: none; padding-top: 0; }
+.campo .k { font-size: 12px; color: var(--tinta-fraca); flex: 0 0 44%; }
 .campo .v { font-size: 13.5px; flex: 1; word-break: break-word; }
+
+/* ── Painel do pedido: quatro perguntas, não uma lista ────────────────────
+   Eram quinze linhas numa coluna só, na ordem em que foram sendo
+   acrescentadas. A cada aviso novo a lista descia mais e o scroll aparecia
+   logo na abertura — num painel que existe para ser lido de relance. */
+.painel .avisos { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.painel .avisos .motivo { margin: 0; }
+
+.painel .grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px 26px;
+  align-items: start;
+}
+.bloco { min-width: 0; }
+.bloco h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--tinta-fraca);
+}
+.bloco .campos { display: flex; flex-direction: column; }
 
 /* ── Personalização ──────────────────────────────────────────────────── */
 .opcao { padding: 12px 0; border-top: 1px solid var(--linha); }

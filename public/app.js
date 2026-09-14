@@ -537,6 +537,28 @@ function etiqueta(texto, extra) {
   return e;
 }
 
+function secao(titulo, campos) {
+  const uteis = campos.filter(Boolean);
+  if (!uteis.length) return null;
+  const s = document.createElement("section");
+  s.className = "bloco";
+  const h = document.createElement("h3");
+  h.textContent = titulo;
+  s.appendChild(h);
+  const corpo = document.createElement("div");
+  corpo.className = "campos";
+  corpo.append(...uteis);
+  s.appendChild(corpo);
+  return s;
+}
+
+function aviso(texto, tom) {
+  const n = document.createElement("div");
+  n.className = "motivo" + (tom ? " " + tom : "");
+  n.textContent = texto;
+  return n;
+}
+
 function abrirPainel(numero) {
   state.selectedId = numero;
   const o = state.orders.find((x) => x.orderNumber === numero);
@@ -546,88 +568,102 @@ function abrirPainel(numero) {
 
   painel.innerHTML = "";
 
+  // ── Cabeçalho: número, loja e a cor, tudo numa linha ────────────────
+  // A cor sobe pro cabeçalho porque é a primeira coisa que se procura, e
+  // ocupava uma linha inteira sozinha logo abaixo.
   const ph = document.createElement("div");
   ph.className = "ph";
+
   const esq = document.createElement("div");
+  esq.className = "titulo";
   const no = document.createElement("div");
   no.className = "order-no mono";
   no.textContent = o.orderNumber;
   esq.appendChild(no);
-  if (o.brand) esq.appendChild(etiqueta(o.brand));
-  if (o.bonificacao) esq.appendChild(etiqueta("Bonificação", "boni"));
+  const etiquetas = document.createElement("div");
+  etiquetas.className = "etiquetas";
+  if (o.brand) etiquetas.appendChild(etiqueta(o.brand));
+  if (o.bonificacao) etiquetas.appendChild(etiqueta("Bonificação", "boni"));
+  if (etiquetas.children.length) esq.appendChild(etiquetas);
+
+  const dir = document.createElement("div");
+  dir.className = "acoes-ph";
+  const selo = document.createElement("span");
+  selo.className = "selo " + o.status;
+  selo.textContent = palavraStatus[o.status] || o.status;
   const fechar = document.createElement("button");
   fechar.className = "fechar";
   fechar.setAttribute("aria-label", "Fechar");
   fechar.textContent = "×";
   fechar.addEventListener("click", fecharPainel);
-  ph.append(esq, fechar);
+  dir.append(selo, fechar);
+
+  ph.append(esq, dir);
   painel.appendChild(ph);
 
-  const selo = document.createElement("span");
-  selo.className = "selo " + o.status;
-  selo.textContent = palavraStatus[o.status] || o.status;
-  painel.appendChild(selo);
-
+  // ── Avisos ──────────────────────────────────────────────────────────
+  const avisos = document.createElement("div");
+  avisos.className = "avisos";
   if (deOutroDia(o)) {
-    const v = document.createElement("div");
-    v.className = "motivo neutro";
-    v.textContent =
-      `Pedido de ${fmtDia(dataDoPedido(o)) || "outro dia"}. Aparece aqui porque continua pendente.`;
-    painel.appendChild(v);
+    avisos.appendChild(
+      aviso(`Pedido de ${fmtDia(dataDoPedido(o)) || "outro dia"}. Aparece aqui porque continua pendente.`, "neutro")
+    );
   }
-
-  if (o.motivoStatus) {
-    const m = document.createElement("div");
-    m.className = "motivo";
-    m.textContent = o.motivoStatus + ".";
-    painel.appendChild(m);
-  }
+  if (o.motivoStatus) avisos.appendChild(aviso(o.motivoStatus + "."));
   if (o.semAcompanhamento) {
-    const n = document.createElement("div");
-    n.className = "motivo neutro";
-    n.textContent =
-      "Saiu por transportadora que o quadro não consulta — só a Mandaê tem integração. Não virão mais eventos por aqui.";
-    painel.appendChild(n);
+    avisos.appendChild(
+      aviso("Saiu por transportadora que o quadro não consulta — só a Mandaê tem integração. Não virão mais eventos por aqui.", "neutro")
+    );
   }
   if (o.entregaNaoConfirmada) {
-    const n = document.createElement("div");
-    n.className = "motivo neutro";
-    n.textContent =
-      "Saiu para entrega e a transportadora não registrou mais nada. Sem ocorrência aberta, isso costuma ser entrega que não foi bipada — não um extravio.";
-    painel.appendChild(n);
+    avisos.appendChild(
+      aviso("Saiu para entrega e a transportadora não registrou mais nada. Sem ocorrência aberta, isso costuma ser entrega que não foi bipada — não um extravio.", "neutro")
+    );
   }
   if (o.rastreioDesconhecido) {
-    const n = document.createElement("div");
-    n.className = "motivo neutro";
-    n.textContent =
-      "A transportadora não conhece este código de rastreio. A etiqueta foi criada no Bling, mas a encomenda nunca entrou no sistema dela.";
-    painel.appendChild(n);
+    avisos.appendChild(
+      aviso("A transportadora não conhece este código de rastreio. A etiqueta foi criada no Bling, mas a encomenda nunca entrou no sistema dela.", "neutro")
+    );
   }
   if (o.aguardandoPrimeiroEvento) {
-    const n = document.createElement("div");
-    n.className = "motivo neutro";
-    n.textContent =
-      "Nota emitida e etiqueta criada. O primeiro evento da transportadora ainda não chegou — normal até a coleta passar.";
-    painel.appendChild(n);
+    avisos.appendChild(
+      aviso("Nota emitida e etiqueta criada. O primeiro evento da transportadora ainda não chegou — normal até a coleta passar.", "neutro")
+    );
   }
+  if (avisos.children.length) painel.appendChild(avisos);
 
-  painel.append(
-    campo("Cliente", o.customer),
-    campo("Destino", o.city),
-    campo("Status no WMS", o.wmsStatus || "sem dado ainda"),
-    campo("Último evento da transportadora", o.carrierStatus || "sem dado ainda"),
-    campo("Nota fiscal", o.notaFiscal, true),
-    campo("Tambem conhecido como", (o.apelidos || []).join(", "), true),
-    campo("Código de rastreio", o.trackingCode, true),
-    campo("Situação no Bling", o.situacaoBling, true),
-    campo("Natureza da operação", o.natureza),
-    campo("Pedido feito em", fmtData(o.placedAt), true),
-    campo("Coleta prevista", fmtData(o.coletaPrevista), true),
-    campo("Prazo para emitir a nota", fmtDia(o.previsaoEntrega), true),
-    campo("Último movimento", fmtData(o.ultimoMovimentoAt), true),
-    campo("Última atualização", fmtData(o.lastEventAt), true),
-    campo("Dias úteis sem novidade", o.diasParados ?? "—", true)
+  // ── Os dados, agrupados por pergunta ────────────────────────────────
+  //
+  // Eram quinze linhas numa coluna só, na ordem em que foram sendo
+  // acrescentadas — e a cada aviso novo a lista descia mais e o scroll
+  // aparecia. Agrupadas, respondem quatro perguntas em vez de uma lista.
+  const grade = document.createElement("div");
+  grade.className = "grade";
+  grade.append(
+    ...[
+      secao("Para quem", [campo("Cliente", o.customer), campo("Destino", o.city)]),
+      secao("Onde está", [
+        campo("Armazém", o.wmsStatus || "sem dado ainda"),
+        campo("Transportadora", o.carrierStatus || "sem dado ainda"),
+        campo("Código de rastreio", o.trackingCode, true),
+        campo("Coleta prevista", fmtData(o.coletaPrevista), true),
+      ]),
+      secao("Documento", [
+        campo("Nota fiscal", o.notaFiscal, true),
+        campo("Natureza da operação", o.natureza),
+        campo("Situação no Bling", o.situacaoBling),
+        campo("Também conhecido como", (o.apelidos || []).join(", "), true),
+      ]),
+      secao("Linha do tempo", [
+        campo("Pedido feito em", fmtData(o.placedAt), true),
+        campo("Último movimento", fmtData(o.ultimoMovimentoAt), true),
+        campo("Última atualização", fmtData(o.lastEventAt), true),
+        campo("Dias úteis sem novidade", o.diasParados ?? "—", true),
+        campo("Prazo para emitir a nota", fmtDia(o.previsaoEntrega), true),
+      ]),
+    ].filter(Boolean)
   );
+  painel.appendChild(grade);
 
   cortina.classList.add("open");
   render();
