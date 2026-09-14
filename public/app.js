@@ -313,7 +313,13 @@ function render() {
 
   marcarSegmento("filters", "filter", state.filter);
   marcarSegmento("periodos", "periodo", state.periodo);
-  montarMarcas(noPeriodo);
+  // A lista de lojas vem do quadro INTEIRO, nao do periodo.
+  //
+  // Montada a partir do periodo, ela mudava de forma a cada filtro: escolher
+  // agosto fazia sumir o Mercado Livre e a Yucaloo, e junto sumia a
+  // possibilidade de seleciona-los. Um filtro que se reorganiza enquanto a
+  // pessoa usa e pior do que um filtro com uma opcao vazia.
+  montarMarcas(state.orders);
   atualizarBotaoOcultos();
 }
 
@@ -466,9 +472,9 @@ function cartao(o) {
 
 // As lojas vêm do que está no período — senão o filtro oferece loja sem
 // nenhum pedido visível.
-function montarMarcas(noPeriodo) {
+function montarMarcas(pedidos) {
   const alvo = document.getElementById("brandFilters");
-  const marcas = [...new Set(noPeriodo.map((o) => o.brand).filter(Boolean))].sort();
+  const marcas = [...new Set(pedidos.map((o) => o.brand).filter(Boolean))].sort();
   const assinatura = marcas.join("|");
 
   const reconstruiu = assinatura !== state.marcasConhecidas;
