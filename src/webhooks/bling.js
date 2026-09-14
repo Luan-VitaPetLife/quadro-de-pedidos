@@ -105,6 +105,15 @@ export function handleStatus(req, res) {
       comecouEm: getMeta("sincronizacaoComecouEm"),
       terminouEm: getMeta("sincronizacaoTerminouEm"),
       etapa: getMeta("sincronizacaoEtapa") || null,
+      reconstrucao: {
+        comecouEm: getMeta("reconstrucaoComecouEm"),
+        terminouEm: getMeta("reconstrucaoTerminouEm"),
+        etapa: getMeta("reconstrucaoEtapa") || null,
+        erro: getMeta("reconstrucaoErro") || null,
+        resultado: (() => {
+          try { return JSON.parse(getMeta("reconstrucaoResultado") || "null"); } catch { return null; }
+        })(),
+      },
       erro: getMeta("sincronizacaoErro") || null,
       resultado: (() => {
         try { return JSON.parse(getMeta("sincronizacaoResultado") || "null"); } catch { return null; }
