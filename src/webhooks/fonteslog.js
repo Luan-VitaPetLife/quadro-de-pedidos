@@ -25,6 +25,9 @@ export async function handleFontesLog(req, res) {
 
   let gravados = 0;
   const ignorados = [];
+  // O WMS nao cria pedido: ele so sabe de remessas que o Bling ja mandou pra
+  // ele. Numero que nao casa com nada vira orfao, e o pente fino mostra.
+  const naoCasaram = [];
 
   for (const p of pedidos) {
     const orderNumber = String(p.numeroPedido || "").trim();
@@ -42,7 +45,7 @@ export async function handleFontesLog(req, res) {
     // acidente: "PARADO: falta de estoque" casaria com a regra de "falta" e
     // viraria vermelho, quando parado e amarelo. Quem leu a tela sabe a cor;
     // mapFontesLogStatus fica so para o status seco do rastreamento.
-    upsertOrder({
+    const gravou = upsertOrder({
       orderNumber,
       wmsStatus: p.status || null,
       notaFiscal: p.notaFiscal || undefined,
@@ -53,10 +56,14 @@ export async function handleFontesLog(req, res) {
       // senao o mesmo pedido aparece duas vezes, um lado com o status do
       // armazem e outro com o rastreio, cada um contando metade da historia.
       numeroProvisorio: true,
+      fonte: "wms",
     });
-    gravados++;
+    if (gravou) gravados++;
+    else naoCasaram.push(orderNumber);
   }
 
-  console.log(`[webhook] fonteslog: ${gravados} pedido(s) gravado(s), ${ignorados.length} ignorado(s).`);
-  res.status(200).json({ ok: true, gravados, ignorados: ignorados.length });
+  console.log(
+    `[webhook] fonteslog: ${gravados} pedido(s) atualizado(s), ${naoCasaram.length} sem pedido correspondente, ${ignorados.length} ignorado(s).`
+  );
+  res.status(200).json({ ok: true, gravados, semCorrespondencia: naoCasaram.length, ignorados: ignorados.length });
 }

@@ -33,7 +33,7 @@ import {
   nomeDaSituacaoDaNota,
 } from "./integrations/bling.js";
 import { mapTextoDaTransportadora, ehEventoFinal } from "./lib/statusMapping.js";
-import { upsertOrder, mesclarEmCanonico, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
+import { upsertOrder, mesclarEmCanonico, registrarApelidos, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
 
 /**
  * Mapa das notas do periodo, indexado pelo ID (que e como o pedido as
@@ -203,7 +203,7 @@ export async function runSyncBling({ dias = 30 } = {}) {
   const paraMesclarPorNota = [];
 
   const situacoes = await situacoesDeVenda();
-  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, notasSemValor: 0, porSituacao: {} };
+  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, notasSemValor: 0, apelidos: 0, porSituacao: {} };
 
   let n = 0;
   for (const resumido of lista) {
@@ -255,8 +255,13 @@ export async function runSyncBling({ dias = 30 } = {}) {
 
       // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
       const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
+      const etiquetaDoPedido =
+        detalhe?.transporte?.volumes?.find((v) => v?.codigoRastreamento)?.codigoRastreamento || null;
 
-      const apelidos = [numeroLoja, nota?.numero, rastreio].filter(Boolean);
+      // Todos os nomes por que esta venda atende. A etiqueta do pedido entra na
+      // lista mesmo sem valer como rastreio: ela nao decide a cor, mas e por ela
+      // que a Mandae vai telefonar, e o telefone precisa tocar no lugar certo.
+      const apelidos = [numeroLoja, nota?.numero, rastreio, etiquetaDoPedido].filter(Boolean);
       if (nota?.pular) r.puladas++;
       r.mesclados += mesclarEmCanonico(canonico, apelidos).mesclados;
 
@@ -323,7 +328,14 @@ export async function runSyncBling({ dias = 30 } = {}) {
           : undefined,
         lastEventAt: nota?.entregaEm || undefined,
         ultimoMovimentoAt: nota?.entregaEm || undefined,
-      });
+        fonte: "bling",
+      }, { permitirCriacao: true });
+
+      // Os apelidos sao gravados DEPOIS do upsert, e nao por mesclagem: nao ha
+      // quadrado nenhum chamado "VITPT000414" pra absorver -- e nem deve haver.
+      // O que ha e o pedido 1462 sabendo que tambem atende por esse nome, para
+      // quando a transportadora ligar.
+      r.apelidos += registrarApelidos(canonico, apelidos);
       if (nota?.numero) paraMesclarPorNota.push([canonico, chaveNota(nota.numero)]);
       r.gravados++;
     } catch (err) {
@@ -383,7 +395,9 @@ export async function runSyncBling({ dias = 30 } = {}) {
         : undefined,
       lastEventAt: nota.entregaEm || undefined,
       ultimoMovimentoAt: nota.entregaEm || undefined,
-    });
+      fonte: "bling/nota",
+    }, { permitirCriacao: true });
+    r.apelidos += registrarApelidos(nota.numero, [nota.rastreio].filter(Boolean));
     paraMesclarPorNota.push([nota.numero, chaveNota(nota.numero)]);
   }
 
@@ -426,7 +440,15 @@ export async function runSyncBling({ dias = 30 } = {}) {
  */
 export function limparPedidosSemStatus() {
   const semNada = listOrders().filter(
-    (o) => !o.wmsStatus && !o.carrierStatus && !o.trackingCode && !o.temNota
+    (o) =>
+      !o.wmsStatus &&
+      !o.carrierStatus &&
+      !o.trackingCode &&
+      !o.temNota &&
+      // Pedido que entrou POR ter estourado o prazo da NF nao tem nada disso --
+      // e exatamente esse o problema dele. Sem esta linha, a sincronizacao o
+      // criava e a limpeza o apagava no mesmo ciclo, para sempre.
+      !dataValida(o.previsaoEntrega)
   );
   for (const o of semNada) apagarPedido(o.orderNumber);
   return semNada.length;

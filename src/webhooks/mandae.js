@@ -107,8 +107,15 @@ export async function handleItemProcessado(req, res) {
 
   // Acabou de ser expedido -- ainda sem evento de rastreio, entao tratamos
   // como aviso (amber) ate o primeiro evento de rastreamento chegar.
-  upsertOrder({
+  //
+  // A Mandae NAO cria pedido. Ela sabe de encomendas, nao de vendas: se este
+  // identificador nao casa com nenhum pedido lido do Bling, o que ela tem a
+  // dizer vira orfao. Era por aqui que nasciam quadrados chamados
+  // "VITPT000421", sem cliente e sem nota -- uma remessa inventada a partir de
+  // um codigo que ninguem reconhecia.
+  const gravou = upsertOrder({
     orderNumber,
+    fonte: "mandae/item-processado",
     trackingCode: body.trackingCode,
     carrierStatus: "Encomenda expedida pela Mandaê",
     carrierSeverity: "amber",
@@ -116,6 +123,10 @@ export async function handleItemProcessado(req, res) {
     rastreioDesconhecido: false,
   });
 
+  if (!gravou) {
+    console.warn(`[webhook] item processado sem pedido correspondente: ${orderNumber} / ${body.trackingCode}`);
+    return res.status(202).json({ ok: true, semCorrespondencia: true, guardadoComoOrfao: orderNumber });
+  }
   console.log(`[webhook] item processado: pedido ${orderNumber} / rastreio ${body.trackingCode}`);
   res.status(200).json({ ok: true });
 }
@@ -148,8 +159,10 @@ export async function handleRastreamento(req, res) {
 
   // So mandamos carrierStatus/carrierSeverity -- db.js recalcula o status
   // final do pedido combinando com o que ja soubermos do WMS (FontesLog).
-  upsertOrder({
+  // Nunca cria: ver o comentario em handleItemProcessado.
+  const gravou = upsertOrder({
     orderNumber,
+    fonte: "mandae/rastreamento",
     trackingCode: body.trackingCode,
     carrierStatus: mapped.label,
     carrierSeverity: mapped.status,
@@ -165,6 +178,10 @@ export async function handleRastreamento(req, res) {
     rastreioDesconhecido: false,
   });
 
+  if (!gravou) {
+    console.warn(`[webhook] rastreamento sem pedido correspondente: ${orderNumber} (${mapped.label})`);
+    return res.status(202).json({ ok: true, semCorrespondencia: true, guardadoComoOrfao: orderNumber });
+  }
   console.log(`[webhook] rastreamento: pedido ${orderNumber} -> ${mapped.status} (${mapped.label})`);
   res.status(200).json({ ok: true });
 }

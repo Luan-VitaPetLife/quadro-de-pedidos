@@ -40,7 +40,7 @@ async function reconcileOneOrder(order) {
     // continuava verde por nao ter noticia nenhuma.
     if (tracking === null) {
       if (!order.rastreioDesconhecido) {
-        upsertOrder({ orderNumber: order.orderNumber, rastreioDesconhecido: true });
+        upsertOrder({ orderNumber: order.orderNumber, rastreioDesconhecido: true, fonte: "mandae/reconsulta" });
       }
       return;
     }
@@ -83,6 +83,7 @@ async function reconcileOneOrder(order) {
       // e-mail sobre a encomenda".
       ultimoMovimentoAt: movimento || lastEventAt,
       rastreioDesconhecido: false,
+      fonte: "mandae/reconsulta",
     });
   } catch (err) {
     console.error(`[sync] falha ao reconciliar ${order.orderNumber} (${order.trackingCode}):`, err.message);

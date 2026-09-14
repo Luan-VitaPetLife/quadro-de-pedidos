@@ -14,7 +14,7 @@
 //   GET /api/pente-fino?s=<segredo>&dias=60&corrigir=1
 //   GET /api/pente-fino?s=<segredo>&limiteMandae=80
 
-import { listOrders, upsertOrder, getOrder, resolverCanonico } from "../lib/db.js";
+import { listOrders, upsertOrder, getOrder, resolverCanonico, listarOrfaos } from "../lib/db.js";
 import { verifyMandaeWebhook } from "./mandae.js";
 import { deduplicar } from "../lib/deduplicar.js";
 
@@ -35,10 +35,15 @@ export async function handlePenteFino(req, res) {
     faltandoNoQuadro: [],
     eventoAtrasado: [],
     semFonteNenhuma: [],
+    semPedidoCorrespondente: [],
   };
   const corrigidos = { mesclados: 0, rastreiosAtualizados: 0, eventosPuxados: 0, criados: 0, marcadosDesconhecidos: 0, situacoesAtualizadas: 0 };
 
   const quadro = listOrders();
+  // O que a transportadora e o armazem disseram e nao casou com pedido nenhum.
+  // Nao e ruido: ou o pedido ainda nao foi lido do Bling, ou existe remessa que
+  // o ERP nao conhece -- e a segunda hipotese precisa de olho humano.
+  achados.semPedidoCorrespondente = listarOrfaos();
 
   // -------------------------------------------------------------------
   // 1. Duplicata dentro do proprio quadro -- nao custa chamada nenhuma.
@@ -120,7 +125,8 @@ export async function handlePenteFino(req, res) {
               previsaoEntrega: detalhe?.dataPrevista || undefined,
               temNota: true,
               situacaoBling: situacao || undefined,
-            });
+              fonte: "bling/pente-fino",
+            }, { permitirCriacao: true });
             corrigidos.criados++;
           }
         }
@@ -277,6 +283,7 @@ export async function handlePenteFino(req, res) {
       faltandoNoQuadro: achados.faltandoNoQuadro.length,
       eventoAtrasado: achados.eventoAtrasado.length,
       semFonteNenhuma: achados.semFonteNenhuma.length,
+      semPedidoCorrespondente: achados.semPedidoCorrespondente.length,
     },
     corrigidos: corrigir ? corrigidos : null,
     achados,
