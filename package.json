@@ -15,7 +15,8 @@
     "check-mandae": "node src/check-mandae.js",
     "testar-pedido": "node src/testar-pedido.js",
     "fonteslog-login": "node src/fonteslog-login.js",
-    "sync-fonteslog": "node src/sync-fonteslog.js"
+    "sync-fonteslog": "node src/sync-fonteslog.js",
+    "reconstruir": "node src/reconstruir.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

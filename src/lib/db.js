@@ -133,6 +133,23 @@ if (!existingCols.includes("situacao_bling")) db.exec("ALTER TABLE orders ADD CO
 if (!existingCols.includes("oculto_em")) db.exec("ALTER TABLE orders ADD COLUMN oculto_em TEXT");
 if (!existingCols.includes("oculto_motivo")) db.exec("ALTER TABLE orders ADD COLUMN oculto_motivo TEXT");
 
+// Noticia que nao casou com pedido nenhum.
+//
+// A Mandae avisa por codigo de rastreio, o WMS por um numero interno dele. Os
+// dois deveriam bater com um apelido de algum pedido do Bling. Quando nao
+// batem, uma de duas coisas e verdade: ou o pedido ainda nao foi lido do Bling
+// (e vai casar sozinho no proximo ciclo), ou existe uma remessa que o ERP nao
+// conhece -- e essa segunda e grave demais pra morrer num console.log.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS orfaos (
+    chave TEXT PRIMARY KEY,
+    fonte TEXT,
+    resumo TEXT,
+    vezes INTEGER NOT NULL DEFAULT 1,
+    visto_em TEXT NOT NULL
+  )
+`);
+
 const getStmt = db.prepare("SELECT * FROM orders WHERE order_number = ?");
 
 function rowToOrder(r) {
@@ -394,6 +411,91 @@ function decodificarNumero(texto) {
     .replace(/&#(\d+);/g, (_, num) => String.fromCodePoint(Number(num)));
 }
 
+/**
+ * Guarda uma noticia que nao achou dono, sem deixar virar quadrado.
+ *
+ * Conta as repeticoes em vez de empilhar linhas: o mesmo codigo desconhecido
+ * chega a cada ciclo, e o que interessa e "ha quanto tempo e quantas vezes",
+ * nao uma lista com a mesma coisa duzentas vezes.
+ */
+export function registrarOrfao(partial) {
+  const chave = String(partial?.orderNumber ?? "").trim();
+  if (!chave) return;
+  const resumo = [partial.carrierStatus, partial.wmsStatus, partial.trackingCode, partial.notaFiscal]
+    .filter(Boolean)
+    .join(" · ")
+    .slice(0, 300);
+  db.prepare(`
+    INSERT INTO orfaos (chave, fonte, resumo, vezes, visto_em) VALUES (?, ?, ?, 1, ?)
+    ON CONFLICT(chave) DO UPDATE SET
+      vezes = vezes + 1,
+      resumo = excluded.resumo,
+      fonte = excluded.fonte,
+      visto_em = excluded.visto_em
+  `).run(chave, partial.fonte || null, resumo || null, new Date().toISOString());
+}
+
+export function listarOrfaos() {
+  return db.prepare("SELECT * FROM orfaos ORDER BY visto_em DESC").all().map((o) => ({
+    chave: o.chave,
+    fonte: o.fonte,
+    resumo: o.resumo,
+    vezes: o.vezes,
+    vistoEm: o.visto_em,
+  }));
+}
+
+/**
+ * Esquece tudo que foi memorizado sobre apelidos e notas.
+ *
+ * Os dois mapas sao construidos uma vez e reaproveitados, o que e certo durante
+ * uma sincronizacao. Mas quem apaga a tabela por fora -- a reconstrucao --
+ * deixa os mapas apontando para quadrados que nao existem mais, e o proximo
+ * upsert grava no lugar errado.
+ *
+ * Achei isto ensaiando a reconstrucao: depois de apagar tudo, gravar o pedido
+ * "1239" caiu no "000283" que tinha acabado de ser apagado, porque o cache
+ * ainda dizia que 1239 era apelido dele. A releitura inteira teria vindo
+ * embaralhada, e de um jeito dificil de perceber.
+ */
+export function esquecerCaches() {
+  invalidarApelidos();
+  invalidarNotas();
+}
+
+/** O orfao achou dono (o pedido apareceu no Bling depois): some da lista. */
+export function limparOrfao(chave) {
+  return db.prepare("DELETE FROM orfaos WHERE chave = ?").run(String(chave)).changes;
+}
+
+/**
+ * Anota que este pedido tambem atende por estes outros nomes.
+ *
+ * Diferente de mesclarEmCanonico, que exige que o apelido JA SEJA um quadrado
+ * pra poder absorve-lo. Aqui nao ha quadrado nenhum pra absorver: o Bling
+ * simplesmente sabe que o pedido 1462 e tambem "000258" e "VITPT000414", e
+ * precisa dizer isso ANTES de a Mandae telefonar.
+ *
+ * Sem isto, fechar a porta de criacao transformaria toda noticia da
+ * transportadora em orfao -- o codigo de rastreio nunca teria virado apelido.
+ */
+export function registrarApelidos(numeroCanonico, apelidos = []) {
+  const canonico = String(numeroCanonico);
+  const atual = getOrder(canonico);
+  if (!atual) return 0;
+
+  const novos = apelidos
+    .map((a) => String(a ?? "").trim())
+    .filter((a) => a && a !== canonico && !(atual.apelidos || []).includes(a));
+  if (!novos.length) return 0;
+
+  const juntos = [...new Set([...(atual.apelidos || []), ...novos])];
+  db.prepare("UPDATE orders SET apelidos = ? WHERE order_number = ?").run(juntos.join(","), canonico);
+  invalidarApelidos();
+  for (const a of novos) limparOrfao(a);
+  return novos.length;
+}
+
 /** Se este numero ja foi absorvido por outro pedido, devolve o dono. */
 export function resolverCanonico(numero) {
   const n = decodificarNumero(String(numero)).replace(/\s+/g, " ").trim();
@@ -416,6 +518,7 @@ export function resolverCanonico(numero) {
 // proxima rodada, e so entao era absorvido. Resolver na hora da escrita fecha a
 // janela -- o quadrado duplicado nunca chega a existir.
 
+const AMBIGUA = Symbol("nota ambigua");
 let cacheNotas = null;
 
 function mapaDeNotas() {
@@ -424,10 +527,16 @@ function mapaDeNotas() {
   for (const l of db.prepare("SELECT order_number, nota_fiscal FROM orders WHERE nota_fiscal IS NOT NULL").all()) {
     const chave = chaveNota(l.nota_fiscal);
     if (!chave) continue;
-    // O primeiro a registrar a nota e o dono. Na pratica o Bling chega antes
-    // (roda sozinho de 2 em 2 horas) e o WMS e manual, entao o dono tende a ser
-    // o numero do pedido -- que e justamente o que a operacao reconhece.
-    if (!cacheNotas.has(chave)) cacheNotas.set(chave, l.order_number);
+    // Chave repetida = AMBIGUIDADE, e ambiguidade nao se resolve no chute.
+    //
+    // A chave descarta os zeros e a serie, e a operacao tem OITO lojas
+    // numerando notas em paralelo. Hoje nao ha colisao na janela de 30 dias,
+    // mas quando a loja B chegar ao numero que a loja A ja usou, "o primeiro
+    // que chegou e o dono" juntaria dois clientes diferentes num quadrado so.
+    // Marcamos como ambigua e nao resolvemos nenhuma das duas: a noticia vira
+    // orfa e alguem olha, que e infinitamente melhor do que trocar o pedido.
+    if (cacheNotas.has(chave)) cacheNotas.set(chave, AMBIGUA);
+    else cacheNotas.set(chave, l.order_number);
   }
   return cacheNotas;
 }
@@ -441,6 +550,7 @@ export function donoDaNota(notaFiscal, excluir) {
   const chave = chaveNota(notaFiscal);
   if (!chave) return null;
   const dono = mapaDeNotas().get(chave);
+  if (dono === AMBIGUA) return null; // duas notas com o mesmo numero: nao adivinha
   return dono && dono !== excluir ? dono : null;
 }
 
@@ -456,7 +566,24 @@ export function donoDaNota(notaFiscal, excluir) {
  * calculado automaticamente a partir do pior entre wmsSeverity e
  * carrierSeverity -- a menos que quem chamar force um `status` explicito.
  */
-export function upsertOrder(partial) {
+/**
+ * Quem pode CRIAR um quadrado, e quem so pode atualizar.
+ *
+ * Esta e a regra que faltava, e a ausencia dela e a origem dos pedidos que o
+ * Luan nao reconhecia. Qualquer fonte podia gravar um numero que o quadro nunca
+ * tinha visto e, com isso, inventar uma remessa: a Mandae avisando de um codigo
+ * desconhecido criava um quadrado sem cliente, sem cidade e sem nota -- que e
+ * exatamente o "volta faltando dados".
+ *
+ * O modelo correto, nas palavras dele: o quadro le o pedido no Bling, acha o
+ * mesmo pedido no WMS e na Mandae, e daí em diante so monitora. O Bling e o
+ * unico que sabe que uma venda existe; os outros dois so tem noticia sobre uma
+ * venda que ja existe.
+ *
+ * Por isso `permitirCriacao` e FALSO por padrao: quem quiser criar precisa
+ * dizer, e so o Bling (e o pente fino, que le do Bling) diz.
+ */
+export function upsertOrder(partial, { permitirCriacao = false } = {}) {
   let orderNumber = resolverCanonico(partial.orderNumber);
   let apelidoNovo = null;
 
@@ -490,6 +617,13 @@ export function upsertOrder(partial) {
     : null;
 
   const existing = getOrder(orderNumber) || {};
+
+  // Nao existe e nao pode criar: a noticia nao se perde, vira orfao -- o pente
+  // fino lista, e alguem decide. Descartar em silencio esconderia remessa real.
+  if (!existing.orderNumber && !permitirCriacao) {
+    registrarOrfao(partial);
+    return null;
+  }
 
   const merged = {
     orderNumber,
@@ -678,7 +812,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     // pessoa tem na mao, mesmo que o quadrado agora se chame outra coisa.
     preencher.apelidos = [...(linha.apelidos || []), apelido];
 
-    upsertOrder({ orderNumber: canonico, ...preencher });
+    upsertOrder({ orderNumber: canonico, ...preencher }, { permitirCriacao: true });
     apagarPedido(apelido);
 
     invalidarApelidos();
