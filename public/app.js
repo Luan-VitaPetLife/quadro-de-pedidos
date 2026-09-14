@@ -412,9 +412,13 @@ function cartao(o) {
     c.textContent = o.customer;
     el.appendChild(c);
   }
-  // Marca de "voltou de outro dia": relógio com a seta anti-horária, o ícone
-  // universal de histórico. Vem antes do número porque a primeira pergunta de
-  // quem vê o cartão passa a ser "isso é de hoje?".
+  // Os ícones dividem o cartão em dois lados, e a divisão tem regra: à direita
+  // o que o pedido É (bonificação, veio de outro dia), à esquerda o que se pode
+  // FAZER com ele. Antes o relógio e o botão de resolver dividiam o mesmo canto
+  // e se sobrepunham.
+  const marcas = document.createElement("span");
+  marcas.className = "marcas";
+
   if (deOutroDia(o)) {
     el.classList.add("de-outro-dia");
     const marca = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -428,7 +432,7 @@ function cartao(o) {
     marca.setAttribute("aria-hidden", "true");
     marca.innerHTML =
       '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>';
-    el.appendChild(marca);
+    marcas.appendChild(marca);
   }
 
   if (o.bonificacao) {
@@ -436,8 +440,9 @@ function cartao(o) {
     b.className = "boni";
     b.textContent = "🎁";
     b.title = "Bonificação ou doação";
-    el.appendChild(b);
+    marcas.appendChild(b);
   }
+  if (marcas.children.length) el.appendChild(marcas);
 
   // Ocultar: a saída manual para o que nenhuma regra resolve.
   //
@@ -609,6 +614,21 @@ function abrirPainel(numero) {
       aviso(`Pedido de ${fmtDia(dataDoPedido(o)) || "outro dia"}. Aparece aqui porque continua pendente.`, "neutro")
     );
   }
+  // O motivo de ter sido resolvido vem primeiro, e nao junto dos campos: e a
+  // resposta para "por que esse pedido esta aqui?", que e a unica pergunta de
+  // quem abre um cartao da gaveta. Estava gravado desde sempre e nao aparecia
+  // em lugar nenhum -- o texto que alguem digitou morria no banco.
+  if (o.oculto) {
+    const quando = fmtDia(o.ocultoEm);
+    avisos.appendChild(
+      aviso(
+        o.ocultoMotivo
+          ? `Marcado como resolvido${quando ? " em " + quando : ""}: ${o.ocultoMotivo}`
+          : `Marcado como resolvido${quando ? " em " + quando : ""}, sem motivo anotado.`,
+        "resolvido"
+      )
+    );
+  }
   if (o.motivoStatus) avisos.appendChild(aviso(o.motivoStatus + "."));
   if (o.semAcompanhamento) {
     avisos.appendChild(
@@ -637,30 +657,43 @@ function abrirPainel(numero) {
   // Eram quinze linhas numa coluna só, na ordem em que foram sendo
   // acrescentadas — e a cada aviso novo a lista descia mais e o scroll
   // aparecia. Agrupadas, respondem quatro perguntas em vez de uma lista.
+  // Cada coluna tem fluxo proprio: os blocos se empilham sem esperar a altura
+  // do vizinho, que era o que abria o vao branco no meio do painel.
+  const coluna = (...blocos) => {
+    const c = document.createElement("div");
+    c.className = "coluna";
+    c.append(...blocos.filter(Boolean));
+    return c.children.length ? c : null;
+  };
+
   const grade = document.createElement("div");
   grade.className = "grade";
   grade.append(
     ...[
-      secao("Para quem", [campo("Cliente", o.customer), campo("Destino", o.city)]),
-      secao("Onde está", [
-        campo("Armazém", o.wmsStatus || "sem dado ainda"),
-        campo("Transportadora", o.carrierStatus || "sem dado ainda"),
-        campo("Código de rastreio", o.trackingCode, true),
-        campo("Coleta prevista", fmtData(o.coletaPrevista), true),
-      ]),
-      secao("Documento", [
-        campo("Nota fiscal", o.notaFiscal, true),
-        campo("Natureza da operação", o.natureza),
-        campo("Situação no Bling", o.situacaoBling),
-        campo("Também conhecido como", (o.apelidos || []).join(", "), true),
-      ]),
-      secao("Linha do tempo", [
-        campo("Pedido feito em", fmtData(o.placedAt), true),
-        campo("Último movimento", fmtData(o.ultimoMovimentoAt), true),
-        campo("Última atualização", fmtData(o.lastEventAt), true),
-        campo("Dias úteis sem novidade", o.diasParados ?? "—", true),
-        campo("Prazo para emitir a nota", fmtDia(o.previsaoEntrega), true),
-      ]),
+      coluna(
+        secao("Para quem", [campo("Cliente", o.customer), campo("Destino", o.city)]),
+        secao("Documento", [
+          campo("Nota fiscal", o.notaFiscal, true),
+          campo("Natureza da operação", o.natureza),
+          campo("Situação no Bling", o.situacaoBling),
+          campo("Também conhecido como", (o.apelidos || []).join(", "), true),
+        ])
+      ),
+      coluna(
+        secao("Onde está", [
+          campo("Armazém", o.wmsStatus || "sem dado ainda"),
+          campo("Transportadora", o.carrierStatus || "sem dado ainda"),
+          campo("Código de rastreio", o.trackingCode, true),
+          campo("Coleta prevista", fmtData(o.coletaPrevista), true),
+        ]),
+        secao("Linha do tempo", [
+          campo("Pedido feito em", fmtData(o.placedAt), true),
+          campo("Último movimento", fmtData(o.ultimoMovimentoAt), true),
+          campo("Última atualização", fmtData(o.lastEventAt), true),
+          campo("Dias úteis sem novidade", o.diasParados ?? "—", true),
+          campo("Prazo para emitir a nota", fmtDia(o.previsaoEntrega), true),
+        ])
+      ),
     ].filter(Boolean)
   );
   painel.appendChild(grade);

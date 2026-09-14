@@ -196,10 +196,22 @@ body {
   gap: 10px;
   flex-wrap: wrap;
 }
+/* Largura fixa para os tres rotulos ("Periodo", "Situacao", "Loja").
+   Sem isso cada linha comeca num ponto diferente, porque a palavra tem
+   tamanho diferente -- e tres controles desalinhados um sobre o outro leem
+   como bagunca mesmo estando todos certos. */
 .rotulo {
   font-size: 11.5px;
   color: var(--tinta-fraca);
+  flex: 0 0 auto;
+  width: 52px;
+  text-align: right;
   margin-right: 2px;
+}
+@media (max-width: 560px) {
+  /* Em tela estreita o rotulo passa a ocupar a linha toda, e alinhar pela
+     direita deixaria ele solto longe do controle. */
+  .rotulo { width: auto; text-align: left; }
 }
 
 /* Segmented control em vez de pílulas soltas: a forma comunica "escolha uma".
@@ -333,7 +345,19 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sq .boni { position: absolute; top: 4px; right: 5px; font-size: 10px; line-height: 1; }
+/* As marcas do que o pedido E ficam juntas, no canto direito. O canto
+   esquerdo e das ACOES -- e antes o relogio disputava aquele espaco com o
+   botao de resolver, um por cima do outro. */
+.sq .marcas {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1;
+}
+.sq .boni { font-size: 10px; line-height: 1; }
 
 .sq.green { background: var(--ok-fundo); border-color: var(--ok-linha); color: var(--ok); }
 .sq.amber { background: var(--aviso-fundo); border-color: var(--aviso-linha); color: var(--aviso); }
@@ -496,6 +520,9 @@ kbd {
   margin: 0 0 14px;
 }
 .motivo.neutro { border-left-color: var(--neutro); }
+/* O motivo de ter sido resolvido e uma decisao humana, nao um diagnostico do
+   sistema: ganha a cor de "seguindo bem" pra se distinguir dos avisos. */
+.motivo.resolvido { border-left-color: var(--ok); color: var(--tinta); }
 
 .campo { padding: 7px 0; border-top: 1px solid var(--linha); display: flex; gap: 14px; align-items: baseline; }
 .campo:first-child { border-top: none; padding-top: 0; }
@@ -509,12 +536,18 @@ kbd {
 .painel .avisos { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .painel .avisos .motivo { margin: 0; }
 
+/* Duas colunas de verdade, nao uma grade de celulas.
+   Com grade, a altura da linha e a do bloco mais alto: "Para quem" tem dois
+   campos e "Onde esta" tem quatro, entao sobrava um vao branco embaixo do
+   primeiro antes de o proximo bloco comecar. Cada coluna com fluxo proprio
+   elimina o vao sem perder as colunas. */
 .painel .grade {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 18px 26px;
   align-items: start;
 }
+.painel .coluna { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .bloco { min-width: 0; }
 .bloco h3 {
   margin: 0 0 8px;
@@ -627,11 +660,9 @@ body.tv .board-topo { display: none; }
    contagem do dia parece errada. */
 .sq.de-outro-dia { border-top-style: dotted; border-top-width: 2px; }
 .sq .relogio {
-  position: absolute;
-  top: 4px;
-  left: 5px;
   width: 11px;
   height: 11px;
+  flex: none;
   opacity: .8;
 }
 /* Espaço para a marca não encostar no número em cartão pequeno. */
