@@ -177,7 +177,7 @@ function hojeISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export async function runSyncBling({ dias = 30 } = {}) {
+export async function runSyncBling({ dias = 60 } = {}) {
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - dias * 86400000);
 

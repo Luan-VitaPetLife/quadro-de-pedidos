@@ -40,7 +40,16 @@ export function startScheduler() {
   // ainda nao existe. Registrar como erro barulhento treinaria a ignorar o log.
   async function rodarBling() {
     try {
-      const dias = Number(process.env.BLING_DIAS || 30);
+      // 60 dias, e nao 30.
+      //
+      // A janela de 30 cortava o comeco do mes anterior: em 14/09, o pedido de
+      // 01/08 fica a 44 dias e simplesmente nao era lido -- foi o que deixou o
+      // 1119 da Olga de fora na reconstrucao. Sessenta cobre o mes corrente e o
+      // anterior inteiros em qualquer dia do ano, que e como a operacao pensa.
+      //
+      // O custo ficou baixo depois que a leitura passou a pular nota de remessa
+      // ja entregue: o historico antigo nao gasta chamada nenhuma na segunda vez.
+      const dias = Number(process.env.BLING_DIAS || 60);
       const { runSyncBling } = await import("./sync-bling.js");
       const { comTravaDeSincronizacao } = await import("./lib/travaDeSincronizacao.js");
       // Pela trava, nao direto: uma sincronizacao disparada a mao pode estar

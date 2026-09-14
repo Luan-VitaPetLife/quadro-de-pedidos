@@ -21,7 +21,7 @@ import { deduplicar } from "../lib/deduplicar.js";
 export async function handlePenteFino(req, res) {
   if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
 
-  const dias = Number(req.query?.dias) || 30;
+  const dias = Number(req.query?.dias) || 60;
   const corrigir = req.query?.corrigir === "1";
   const limiteMandae = Number(req.query?.limiteMandae) || 120;
 

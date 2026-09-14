@@ -22,7 +22,7 @@ import { reconstruirQuadro } from "./lib/reconstrucao.js";
 async function main() {
   const args = process.argv.slice(2);
   const seco = args.includes("--seco");
-  const dias = Number(args.find((a) => /^\d+$/.test(a)) || 30);
+  const dias = Number(args.find((a) => /^\d+$/.test(a)) || 60);
 
   const r = await reconstruirQuadro({ dias, seco, aoAndar: (t) => console.log("  " + t) });
 

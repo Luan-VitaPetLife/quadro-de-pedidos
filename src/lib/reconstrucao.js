@@ -27,7 +27,7 @@ function carimbo() {
 /**
  * @param {{dias?: number, seco?: boolean, aoAndar?: (texto: string) => void}} opcoes
  */
-export async function reconstruirQuadro({ dias = 30, seco = false, aoAndar = () => {} } = {}) {
+export async function reconstruirQuadro({ dias = 60, seco = false, aoAndar = () => {} } = {}) {
   const antes = listOrders();
   const resolvidos = antes
     .filter((o) => o.oculto)

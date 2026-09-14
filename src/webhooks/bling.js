@@ -190,7 +190,7 @@ export async function handleSincronizar(req, res) {
     return res.status(409).json({ error: "ja existe uma sincronizacao do Bling em andamento" });
   }
 
-  const dias = Number(req.query?.dias) || 30;
+  const dias = Number(req.query?.dias) || 60;
   res.json({ ok: true, iniciada: true, dias, acompanhe: "veja os logs do Railway ou /bling/status" });
 
   // O desfecho vai pro meta, nao so pro log.
