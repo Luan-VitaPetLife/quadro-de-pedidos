@@ -206,7 +206,7 @@ async function carregarCanais() {
     const dados = await blingFetch("/canais-venda", { limite: 100, pagina: 1 });
     for (const c of dados?.data || []) {
       const nome = c.descricao || c.nome || c.tipo;
-      if (c.id != null && nome) nomesDeLoja.set(String(c.id), comTipo(nome, c.tipo));
+      if (c.id != null && nome) nomesDeLoja.set(String(c.id), nome);
     }
     console.log(`[bling] ${nomesDeLoja.size} canal(is) de venda carregado(s).`);
   } catch (err) {
@@ -214,32 +214,20 @@ async function carregarCanais() {
   }
 }
 
-/**
- * Acrescenta a plataforma ao nome do canal, quando ela identifica.
- *
- * O Bling devolve `tipo` junto de cada canal ("Shopify", "Shopee",
- * "MercadoLivre", "TikTok", "LojaFisica"). Duas lojas da operacao sao Shopify e
- * o nome delas nao diz isso -- "Coco and Luna - Brasil" e "Yucaloo - Brasil"
- * parecem lojas proprias quaisquer.
- *
- * So o Shopify ganha sufixo, e de proposito: "Shopee (Shopee)" nao informa
- * nada. A regra e acrescentar o que o nome ja nao diz.
- */
-function comTipo(nome, tipo) {
-  if (String(tipo || "").toLowerCase() !== "shopify") return nome;
-  return /shopify/i.test(nome) ? nome : `${nome} (Shopify)`;
-}
-
 export async function nomeDaLoja(id) {
   if (id == null) return null;
   const chave = String(id);
 
   // Loja 0 nao e uma loja: e o Bling dizendo "esta saida nao veio de canal de
-  // venda nenhum". Na operacao sao as bonificacoes e doacoes -- conferi as 54
-  // que estao no quadro e TODAS tem natureza "Saida em bonificacao" -- e elas
-  // nascem direto como nota, sem venda por tras. Imprimir "Loja 0" fazia o
-  // filtro anunciar uma loja que nao existe.
-  if (chave === "0") return "Bonificações";
+  // venda nenhum" -- sao bonificacoes e doacoes emitidas direto como nota.
+  //
+  // Devolve NULL, e nao um rotulo inventado. Tentei "Sem canal de venda" e
+  // depois "Bonificacoes", e cada tentativa criou uma loja nova no filtro: o
+  // nome fica gravado em cada pedido, entao os antigos ficavam com o rotulo
+  // velho e os novos com o novo, e o filtro passou a listar a mesma coisa tres
+  // vezes. Sem canal, sem nome; quem procura bonificacao usa o filtro de
+  // Situacao, que existe pra isso.
+  if (chave === "0") return null;
   await carregarCanais();
   if (nomesDeLoja.has(chave)) return nomesDeLoja.get(chave);
 

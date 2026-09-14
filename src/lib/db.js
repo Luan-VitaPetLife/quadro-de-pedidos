@@ -898,4 +898,36 @@ export function normalizarNumerosEscapados() {
   return corrigidos;
 }
 
+/**
+ * Desfaz os rotulos de loja que eu inventei e que viraram lojas fantasma.
+ *
+ * O nome da loja e gravado em CADA pedido. Quando mudei o rotulo, os pedidos
+ * ja gravados ficaram com o nome antigo e os novos com o novo -- e o filtro
+ * passou a listar "Coco and Luna - Brasil" e "Coco and Luna - Brasil (Shopify)"
+ * como se fossem duas lojas, e a mesma coisa com "Loja 0", "Sem canal de venda"
+ * e "Bonificacoes".
+ *
+ * Nome denormalizado e assim: renomear nao e trocar um valor, e criar um valor
+ * novo ao lado do antigo. A licao fica no codigo porque a proxima tentacao de
+ * "so melhorar o rotulo" vai parecer igualmente inofensiva.
+ *
+ * Roda na subida e some sozinha quando nao houver mais o que consertar.
+ */
+export function limparRotulosDeLoja() {
+  const semCanal = ["Loja 0", "Sem canal de venda", "Bonificações", "Bonificacoes"];
+  let corrigidos = 0;
+
+  for (const nome of semCanal) {
+    corrigidos += db.prepare("UPDATE orders SET brand = NULL WHERE brand = ?").run(nome).changes;
+  }
+  // " (Shopify)" era decoracao minha; o nome do canal no Bling nao tem isso.
+  corrigidos += db
+    .prepare("UPDATE orders SET brand = REPLACE(brand, ' (Shopify)', '') WHERE brand LIKE '% (Shopify)'")
+    .run().changes;
+
+  if (corrigidos) console.log(`[db] ${corrigidos} rotulo(s) de loja normalizado(s).`);
+  return corrigidos;
+}
+
 normalizarNumerosEscapados();
+limparRotulosDeLoja();
