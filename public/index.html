@@ -85,12 +85,14 @@
       </div>
       <div class="grid" id="grid"></div>
       <div class="vazio" id="emptyState" hidden></div>
+      <!-- Os textos vem das preferencias: o quadro e lido por gente que nao
+           acompanhou as decisoes daqui, e cada operacao tem seu vocabulario. -->
       <div class="legenda">
-        <span><i class="pt ok"></i>Seguindo bem</span>
-        <span><i class="pt aviso"></i>Precisa de atenção</span>
-        <span><i class="pt erro"></i>Com problema</span>
-        <span class="tracejado"><i class="pt neutro"></i>Transportadora sem acompanhamento</span>
-        <span class="com-relogio">De outro dia, ainda pendente</span>
+        <span><i class="pt ok"></i><span data-legenda="ok"></span></span>
+        <span><i class="pt aviso"></i><span data-legenda="aviso"></span></span>
+        <span><i class="pt erro"></i><span data-legenda="erro"></span></span>
+        <span class="tracejado"><i class="pt neutro"></i><span data-legenda="tracejado"></span></span>
+        <span class="com-relogio"><span data-legenda="relogio"></span></span>
       </div>
     </section>
   </div>
@@ -138,14 +140,40 @@
         </div>
       </div>
 
+      <div class="opcao">
+        <label>Destaque do cartão</label>
+        <div class="segmentado" id="optPrincipal">
+          <button class="seg" data-principal="numero" data-active="true">Nº do pedido</button>
+          <button class="seg" data-principal="cliente">Cliente</button>
+          <button class="seg" data-principal="rastreio">Rastreio</button>
+        </div>
+        <p class="dica menor">É a linha grande, a que se lê de longe. Os outros dois viram linhas menores, se você ligar abaixo.</p>
+      </div>
+
       <div class="opcao linha">
-        <label for="optRastreio">Mostrar código de rastreio</label>
-        <input type="checkbox" id="optRastreio" checked>
+        <label for="optNumero">Mostrar nº do pedido</label>
+        <input type="checkbox" id="optNumero">
       </div>
 
       <div class="opcao linha">
         <label for="optCliente">Mostrar nome do cliente</label>
         <input type="checkbox" id="optCliente">
+      </div>
+
+      <div class="opcao linha">
+        <label for="optRastreio">Mostrar código de rastreio</label>
+        <input type="checkbox" id="optRastreio" checked>
+      </div>
+
+      <div class="opcao">
+        <label>Texto da legenda</label>
+        <div class="legenda-campos">
+          <label class="lc"><i class="pt ok"></i><input type="text" id="legOk" maxlength="40"></label>
+          <label class="lc"><i class="pt aviso"></i><input type="text" id="legAviso" maxlength="40"></label>
+          <label class="lc"><i class="pt erro"></i><input type="text" id="legErro" maxlength="40"></label>
+          <label class="lc"><i class="pt neutro"></i><input type="text" id="legTracejado" maxlength="40"></label>
+          <label class="lc"><span class="lc-relogio"></span><input type="text" id="legRelogio" maxlength="40"></label>
+        </div>
       </div>
 
       <p class="dica">As preferências ficam salvas neste navegador. <kbd>Esc</kbd> sai da tela cheia.</p>
