@@ -68,7 +68,7 @@ notícia) ficam como estão.
 ```
 src/
   server.js              servidor web, rotas e encerramento gracioso
-  scheduler.js           ciclo a cada SYNC_INTERVAL_MINUTES (padrão 2h)
+  scheduler.js           varredura (2h), via rápida do Bling (3min) e pulso do WMS
   sync.js                reconsulta a Mandaê nos pedidos conhecidos (reforço)
   sync-bling.js          lê o Bling, mescla duplicados, preenche cadastro
   sync-fonteslog.js      lê o WMS na sua máquina (conferência; o servidor já lê sozinho)
@@ -76,7 +76,8 @@ src/
   check-mandae.js        diagnóstico da conexão com a Mandaê
   testar-pedido.js       testa a integração inteira com um pedido real
   integrations/          clientes: mandae.js, fonteslog.js, bling.js
-  webhooks/              handlers: mandae.js, fonteslog.js, bling.js
+  webhooks/              handlers: mandae.js, fonteslog.js, bling.js,
+                         blingEventos.js (o webhook de pedido/nota alterados)
   lib/
     statusMapping.js     regras de cor + envelhecimento
     diasUteis.js         calendário de feriados nacionais
@@ -138,6 +139,50 @@ velho **sem aviso** é pior do que dado nenhum: os quadrados continuariam com o
 > HTML já vem com todas as linhas. Confirmado: a tela exibia 10 e o HTML
 > trazia 66. Não existe página 2 para buscar.
 
+## Com que rapidez um pedido aparece
+
+Três relógios, porque são três perguntas de custo muito diferente.
+
+| Quando | O que faz | Custo |
+|---|---|---|
+| a cada 3 min | pergunta ao Bling **o que mudou** desde a última vez | quase nada: 0 a 3 pedidos |
+| a cada 2 h | varre os últimos 60 dias inteiros | 1 chamada de detalhe **por pedido** |
+| ao receber o webhook | adianta a pergunta de 3 min | idem à via rápida |
+
+A varredura não é desperdício: ela é a rede de segurança. O webhook pode não
+estar configurado, pode cair, e o próprio Bling avisa que não garante ordem nem
+entrega única. A via rápida pode perder uma janela num deploy. A varredura vê
+tudo de novo e conserta.
+
+### Dois detalhes que custam caro se esquecidos
+
+**O relógio do Bling é o de São Paulo.** O container roda em UTC, e uma janela
+montada com `toISOString()` cai três horas no futuro: o filtro aceita, responde
+`200` e devolve lista vazia — a via rápida *pareceria* funcionar sem nunca
+trazer nada. Medido: a janela `08:40–09:40` devolveu os pedidos 1515 e 1517; a
+mesma janela escrita em UTC devolveu zero. Por isso `momentoNoBling()`.
+
+**`/nfe` ignora o filtro de alteração.** Uma janela de alteração impossível
+devolve a lista inteira, em silêncio. Só `/pedidos/vendas` filtra por alteração
+de verdade (janela de 2019 → zero; parâmetro inventado → não filtra nada). Por
+isso as notas vêm por **emissão** recente — que de todo modo é o evento que
+interessa: nota emitida é o marco em que a remessa vai pro WMS.
+
+### Ligando o webhook (feito uma vez, no Bling)
+
+1. Bling → **Área do integrador** → o seu app → aba **Webhooks**
+2. URL: `https://quadro.vitapetlife.com/webhooks/bling`
+3. Recursos: **Pedido de venda** e **Nota fiscal**, ações *criado* e *alterado*
+4. Salvar. Não há segredo a preencher: a autenticação é a assinatura
+   HMAC-SHA256 que o Bling manda em `X-Bling-Signature-256`, conferida contra o
+   `BLING_CLIENT_SECRET` do app.
+
+Para saber se está chegando, `GET /api/diagnostico?s=SEGREDO` mostra
+`bling.webhookUltimoEm`, `webhookUltimoEvento` e `webhookUltimaRecusa`. Sem
+isso, "configurado e funcionando" e "nunca configurado" seriam
+indistinguíveis — nos dois casos o quadro fica atualizado, porque a via rápida
+cobre os dois; a diferença é segundos contra minutos.
+
 ## Configuração
 
 Copie `.env.example` para `.env` e preencha. As mesmas chaves vão nas
@@ -153,7 +198,8 @@ resultante é que vai para o servidor, pela rota de entrega.
 | `FONTESLOG_URL` | portal do WMS (o servidor também precisa: é ele quem lê) |
 | `FONTESLOG_LOGIN` / `_SENHA` | preenchem o formulário do login manual (**só local**) |
 | `WMS_PULSO_MINUTOS` | padrão 10. De quanto em quanto tempo a sessão do WMS é mantida viva |
-| `SYNC_INTERVAL_MINUTES` | padrão 120. Acima de 60, use múltiplos de 60 |
+| `SYNC_INTERVAL_MINUTES` | varredura completa; padrão 120. Acima de 60, use múltiplos de 60 |
+| `BLING_VIA_RAPIDA_MINUTOS` | "o que mudou?"; padrão 3, entre 1 e 30 |
 | `DIAS_UTEIS_AVISO` / `_PROBLEMA` | envelhecimento (padrão 5 e 10) |
 | `BOARD_URL` | quadro alvo dos scripts locais |
 | `DATA_DIR` | opcional: o Railway já usa o Volume sozinho |
