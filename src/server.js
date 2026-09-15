@@ -278,6 +278,9 @@ app.get("/api/diagnostico", (req, res) => {
     // SEGUNDOS contra MINUTOS, e so da pra saber olhando se algum evento chegou.
     bling: {
       ultimaLeitura: getMeta("lastBlingSyncAt") || null,
+      viaRapidaTentativaEm: getMeta("viaRapidaUltimaTentativaEm") || null,
+      viaRapidaResultado: getMeta("viaRapidaUltimoResultado") || null,
+      viaRapidaErro: getMeta("viaRapidaUltimoErro") || null,
       webhookUltimoEm: getMeta("blingWebhookUltimoEm") || null,
       webhookUltimoEvento: getMeta("blingWebhookUltimoEvento") || null,
       webhookUltimaRecusa: getMeta("blingWebhookUltimaRecusa") || null,

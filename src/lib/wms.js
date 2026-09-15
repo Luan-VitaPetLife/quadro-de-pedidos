@@ -14,7 +14,7 @@ import {
   ultimoMovimento,
 } from "../integrations/fonteslog.js";
 import { mapFontesLogStatus } from "./statusMapping.js";
-import { conferirSessao, sessaoGravadaEm, temSessao } from "../integrations/fonteslog.js";
+import { sessaoGravadaEm, temSessao } from "../integrations/fonteslog.js";
 import { getMeta, setMeta, upsertOrder } from "./db.js";
 
 /**
@@ -205,38 +205,25 @@ export async function sincronizarWms({ dias = 60 } = {}) {
   }
 }
 
-/**
- * O pulso que mantem a sessao de pe entre um ciclo e outro.
- *
- * Isto e o coracao da automacao, e o motivo e uma particularidade do portal: o
- * cookie `ASP.NET_SessionId` nao tem data de validade. Quem decide quando ele
- * morre e o servidor, por INATIVIDADE -- a janela padrao do ASP.NET e 20
- * minutos, e ela reinicia a cada pedido. Um ciclo de sincronizacao de 2 horas
- * deixaria a sessao morrer sozinha entre um ciclo e outro, e o login manual
- * viraria rotina diaria. Batendo numa tela barata a cada poucos minutos, a
- * janela nunca fecha.
- *
- * O que ainda derruba, e contra o que nao ha jeito: o portal reiniciar (a
- * sessao vive na memoria do servidor deles) ou a propria DDS expirar por tempo
- * absoluto. Ai e login manual mesmo.
- */
-export async function pulsarSessaoWms() {
-  if (!temSessao()) {
-    anotarEstado("ausente", "nunca houve login neste servidor");
-    return { viva: false };
-  }
-  const r = await conferirSessao();
-  if (r.viva) {
-    anotarEstado("ok");
-    setMeta("wmsUltimoPulsoEm", new Date().toISOString());
-  } else if (r.indisponivel) {
-    // Portal fora do ar nao e sessao morta -- pedir login nao resolveria.
-    anotarEstado("indisponivel", r.motivo);
-  } else {
-    anotarEstado("expirada", `expirou; o login foi feito em ${sessaoGravadaEm() || "?"}`);
-  }
-  return r;
-}
+// ---------------------------------------------------------------------------
+// Por que a leitura do WMS e o pulso da sessao viraram a MESMA coisa
+// ---------------------------------------------------------------------------
+//
+// O cookie `ASP.NET_SessionId` nao tem data de validade: quem decide quando ele
+// morre e o servidor da DDS, por INATIVIDADE -- a janela padrao do ASP.NET e de
+// ~20 minutos, e ela reinicia a cada requisicao. Por isso o quadro precisa bater
+// no portal de poucos em poucos minutos, ou a sessao morre sozinha entre um
+// ciclo e outro e o login manual vira rotina diaria.
+//
+// A primeira versao batia numa tela so pra dizer "ainda estou aqui", e lia os
+// pedidos de verdade so no ciclo de 2 horas. Era trabalho jogado fora: ler as
+// tres telas custa tres GETs, contra um -- nao ha chamada por pedido aqui, como
+// ha no Bling. Ou seja, o preco de manter a sessao viva e praticamente o mesmo
+// preco de trazer o armazem inteiro atualizado.
+//
+// Entao o pulso virou leitura. O status do armazem passa a ter no maximo alguns
+// minutos de atraso em vez de duas horas, e manter a sessao de pe deixou de ser
+// uma tarefa separada: e efeito colateral de fazer o trabalho.
 
 /** O que o quadro precisa saber pra avisar que o WMS parou. */
 export function estadoDoWms() {
@@ -251,7 +238,6 @@ export function estadoDoWms() {
     desde: getMeta("wmsSessaoDesde") || null,
     detalhe: getMeta("wmsSessaoDetalhe") || "",
     ultimaLeituraEm: getMeta("wmsUltimaLeituraEm") || null,
-    ultimoPulsoEm: getMeta("wmsUltimoPulsoEm") || null,
     loginFeitoEm: sessaoGravadaEm(),
     ultimoResultado: ultimo,
   };

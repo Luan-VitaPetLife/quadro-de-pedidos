@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { runSync } from "./sync.js";
-import { sincronizarWms, pulsarSessaoWms } from "./lib/wms.js";
+import { sincronizarWms } from "./lib/wms.js";
 
 /**
  * Monta uma expressao cron valida a partir de um intervalo em MINUTOS.
@@ -147,6 +147,17 @@ export function startScheduler() {
   const minutosDaViaRapida = intervaloValido(process.env.BLING_VIA_RAPIDA_MINUTOS, 3, 1, 30);
   const margemDaJanela = minutosDaViaRapida * 3 + 5;
 
+  // Deixa rastro do que a via rapida fez, em meta, e nao so no log.
+  //
+  // O log do container nao esta ao alcance de quem opera -- e sem rastro,
+  // "rodou e nao achou nada" e "nunca rodou" produzem exatamente o mesmo
+  // sintoma: um carimbo de sincronizacao parado. Foi essa duvida que me custou
+  // tempo aqui, entao ela nao deveria existir de novo.
+  async function anotar(chave, valor) {
+    const { setMeta } = await import("./lib/db.js");
+    setMeta(chave, typeof valor === "string" ? valor : JSON.stringify(valor));
+  }
+
   async function viaRapida() {
     try {
       const { momentoNoBling } = await import("./integrations/bling.js");
@@ -154,11 +165,20 @@ export function startScheduler() {
       const { comTravaDeSincronizacao } = await import("./lib/travaDeSincronizacao.js");
 
       const desde = momentoNoBling(new Date(Date.now() - margemDaJanela * 60000));
+      await anotar("viaRapidaUltimaTentativaEm", new Date().toISOString());
       // Pela mesma trava da varredura: as duas escrevem nos mesmos quadrados e
       // dividiriam o orcamento de chamadas da API entre si. Quando a varredura
       // esta rodando, pular e o certo -- ela ja ve tudo que a via rapida veria.
       const { rodou, resultado } = await comTravaDeSincronizacao(() => runSyncBling({ alteradosDesde: desde }));
-      if (!rodou) return;
+      if (!rodou) {
+        await anotar("viaRapidaUltimoResultado", `pulei: varredura em andamento @ ${new Date().toISOString()}`);
+        return;
+      }
+      await anotar(
+        "viaRapidaUltimoResultado",
+        `${resultado?.pedidos ?? "?"} na listagem, ${resultado?.gravados ?? 0} gravado(s), ` +
+          `${resultado?.criados ?? 0} novo(s), desde ${desde} @ ${new Date().toISOString()}`
+      );
 
       // Pedido novo traz rastreio novo, e rastreio novo ainda nao tem historia
       // no quadro. Sem isto ele apareceria sem status da transportadora ate a
@@ -172,6 +192,7 @@ export function startScheduler() {
       const { runSync } = await import("./sync.js");
       await runSync({ apenas: tocados }).catch((err) => console.error("[via-rapida] Mandae:", err.message));
     } catch (err) {
+      await anotar("viaRapidaUltimoErro", `${err.message} @ ${new Date().toISOString()}`).catch(() => {});
       if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) return;
       console.error("[via-rapida] erro:", err.message);
     }
@@ -183,23 +204,28 @@ export function startScheduler() {
       `olhando ${margemDaJanela} minuto(s) pra tras.`
   );
 
-  // O pulso da sessao da FontesLog, num relogio proprio e muito mais rapido que
-  // o ciclo.
+  // A leitura do WMS, num relogio proprio e muito mais rapido que o ciclo.
   //
-  // Precisa ser separado porque as duas coisas medem tempos diferentes: o ciclo
-  // e caro e roda de 2 em 2 horas, mas a sessao do portal morre por inatividade
-  // em ~20 minutos. Sem este pulso, ela expiraria sozinha entre um ciclo e
-  // outro e o login manual viraria rotina diaria -- que e exatamente o problema
-  // que isto veio resolver. Dez minutos da margem folgada para um pedido perdido
-  // sem chegar perto do limite.
+  // Precisa ser separada porque as duas coisas medem tempos diferentes: o ciclo
+  // e caro (uma chamada por pedido no Bling) e roda de 2 em 2 horas, mas a
+  // sessao do portal morre por inatividade em ~20 minutos. Sem bater la nesse
+  // meio tempo, ela expiraria sozinha e o login manual viraria rotina diaria.
+  //
+  // E ja que o quadro PRECISA bater no portal de qualquer forma, ele le de
+  // verdade: as tres telas custam tres GETs, contra um so pra dizer "ainda
+  // estou aqui". Pelo mesmo preco, o status do armazem passa a ter minutos de
+  // atraso em vez de duas horas. Dez minutos da margem folgada para uma rodada
+  // perdida sem chegar perto do limite da sessao.
   // Preso entre 1 e 30 de proposito: acima de 30 nao adianta nada (a sessao ja
   // teria morrido na janela de ~20 minutos), e um valor invalido no ambiente nao
   // pode virar uma expressao cron quebrada que derruba a subida do servidor.
   const minutosDoPulso = intervaloValido(process.env.WMS_PULSO_MINUTOS, 10, 1, 30);
   const pulso = cron.schedule(`*/${minutosDoPulso} * * * *`, () => {
-    pulsarSessaoWms().catch((err) => console.error("[wms] erro no pulso:", err.message));
+    sincronizarWms({ dias: Number(process.env.BLING_DIAS || 60) }).catch((err) =>
+      console.error("[wms] erro na leitura:", err.message)
+    );
   });
-  console.log(`[scheduler] sessao da FontesLog sera mantida viva a cada ${minutosDoPulso} minuto(s).`);
+  console.log(`[scheduler] WMS lido (e sessao mantida viva) a cada ${minutosDoPulso} minuto(s).`);
 
   // Devolvidos pra que o encerramento gracioso consiga parar os timers -- sem
   // isso o cron segura o processo vivo e o desligamento estoura o prazo.
