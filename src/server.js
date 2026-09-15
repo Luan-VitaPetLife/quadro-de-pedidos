@@ -278,6 +278,10 @@ app.get("/api/diagnostico", (req, res) => {
     // SEGUNDOS contra MINUTOS, e so da pra saber olhando se algum evento chegou.
     bling: {
       ultimaLeitura: getMeta("lastBlingSyncAt") || null,
+      // O que a subida decidiu: varrer ou aproveitar a varredura anterior. Sem
+      // isto, "pulou porque a varredura ainda valia" e "a varredura falhou" sao
+      // indistinguiveis de fora -- nos dois casos o carimbo fica parado.
+      subidaDecidiu: getMeta("subidaUltimaDecisao") || null,
       viaRapidaTentativaEm: getMeta("viaRapidaUltimaTentativaEm") || null,
       viaRapidaResultado: getMeta("viaRapidaUltimoResultado") || null,
       viaRapidaErro: getMeta("viaRapidaUltimoErro") || null,

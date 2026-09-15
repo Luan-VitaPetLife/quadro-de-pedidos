@@ -118,9 +118,6 @@ export function startScheduler() {
     }
   }
 
-  // Roda uma vez ao subir, sem travar o boot do servidor.
-  ciclo();
-
   const tarefa = cron.schedule(cronExpr, () => {
     ciclo();
   });
@@ -158,13 +155,18 @@ export function startScheduler() {
     setMeta(chave, typeof valor === "string" ? valor : JSON.stringify(valor));
   }
 
-  async function viaRapida() {
+  /**
+   * @param {{janelaMinutos?: number}} opcoes quanto olhar pra tras. O padrao
+   *   serve ao ciclo de minutos; a subida pede uma janela maior, para cobrir o
+   *   tempo em que o servidor esteve fora do ar.
+   */
+  async function viaRapida({ janelaMinutos = margemDaJanela } = {}) {
     try {
       const { momentoNoBling } = await import("./integrations/bling.js");
       const { runSyncBling } = await import("./sync-bling.js");
       const { comTravaDeSincronizacao } = await import("./lib/travaDeSincronizacao.js");
 
-      const desde = momentoNoBling(new Date(Date.now() - margemDaJanela * 60000));
+      const desde = momentoNoBling(new Date(Date.now() - janelaMinutos * 60000));
       await anotar("viaRapidaUltimaTentativaEm", new Date().toISOString());
       // Pela mesma trava da varredura: as duas escrevem nos mesmos quadrados e
       // dividiriam o orcamento de chamadas da API entre si. Quando a varredura
@@ -198,7 +200,9 @@ export function startScheduler() {
     }
   }
 
-  const rapida = cron.schedule(`*/${minutosDaViaRapida} * * * *`, viaRapida);
+  // Envolvida numa seta, e nao passada direto: o node-cron chama a tarefa com a
+  // data agendada, e ela cairia no lugar das opcoes de viaRapida.
+  const rapida = cron.schedule(`*/${minutosDaViaRapida} * * * *`, () => viaRapida());
   console.log(
     `[scheduler] via rapida do Bling a cada ${minutosDaViaRapida} minuto(s), ` +
       `olhando ${margemDaJanela} minuto(s) pra tras.`
@@ -226,6 +230,64 @@ export function startScheduler() {
     );
   });
   console.log(`[scheduler] WMS lido (e sessao mantida viva) a cada ${minutosDoPulso} minuto(s).`);
+
+  // ---------------------------------------------------------------------
+  // A subida
+  // ---------------------------------------------------------------------
+  //
+  // Antes toda subida disparava a varredura completa: ~10 minutos e mais de mil
+  // chamadas ao Bling. Numa tarde de ajustes isso e puro desperdicio -- dez
+  // deploys sao dez varreduras relendo os mesmos 60 dias, e a ultima nem chega
+  // a terminar antes do proximo deploy derrubar o processo.
+  //
+  // Mas a varredura na subida existe por um motivo de verdade: se o servidor
+  // ficou fora do ar, ha um buraco a tapar. A pergunta certa nao e "subiu?", e
+  // "quanto tempo se perdeu?".
+  //
+  // Se a ultima varredura ainda e recente, a via rapida cobre o buraco sozinha
+  // -- basta ela olhar pra tras ate ANTES da ultima varredura, e nao apenas os
+  // poucos minutos de sempre. Se faz tempo, varre.
+  async function cicloDeSubida() {
+    const { getMeta } = await import("./lib/db.js");
+    const ultima = getMeta("lastBlingSyncAt");
+    const idade = ultima ? (Date.now() - Date.parse(ultima)) / 60000 : Infinity;
+
+    if (!Number.isFinite(idade) || idade >= minutes) {
+      const quanto = Number.isFinite(idade) ? `${Math.round(idade)} min` : "nunca";
+      console.log(`[scheduler] ultima varredura: ${quanto}. Varrendo na subida.`);
+      await anotar("subidaUltimaDecisao", `varredura completa (ultima ha ${quanto}) @ ${new Date().toISOString()}`);
+      await ciclo();
+      return;
+    }
+
+    console.log(
+      `[scheduler] ultima varredura ha ${Math.round(idade)} min, ainda vale; ` +
+        `subindo pela via rapida e pulando a varredura.`
+    );
+    await anotar(
+      "subidaUltimaDecisao",
+      `via rapida (varredura de ${Math.round(idade)} min atras aproveitada) @ ${new Date().toISOString()}`
+    );
+
+    // A janela cobre desde antes da ultima varredura ate agora, com a margem de
+    // sempre por cima: o que mudou enquanto o servidor estava fora entra aqui.
+    await viaRapida({ janelaMinutos: idade + margemDaJanela });
+
+    // O WMS vai junto de qualquer forma. Ele nao entra na conta do que se
+    // economiza: sao tres GETs no portal, e sem ele o armazem ficaria ate dez
+    // minutos sem aparecer logo depois de um deploy.
+    await sincronizarWms({ dias: Number(process.env.BLING_DIAS || 60) }).catch((err) =>
+      console.error("[wms] erro na subida:", err.message)
+    );
+  }
+
+  // Roda uma vez ao subir, sem travar o boot do servidor.
+  //
+  // AQUI, e nao la em cima junto da definicao do ciclo: `margemDaJanela` e
+  // `minutosDaViaRapida` sao const declaradas neste corpo, e chamar isto antes
+  // delas existirem estoura com ReferenceError -- o erro morreria no catch de
+  // alguem e a subida ficaria sem sincronizar, em silencio.
+  cicloDeSubida().catch((err) => console.error("[scheduler] erro na subida:", err.message));
 
   // Devolvidos pra que o encerramento gracioso consiga parar os timers -- sem
   // isso o cron segura o processo vivo e o desligamento estoura o prazo.
