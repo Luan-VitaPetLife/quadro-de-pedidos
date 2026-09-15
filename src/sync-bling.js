@@ -361,6 +361,10 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
         trackingCodeAutoritativo: notaOpina,
         situacaoBling: situacao || undefined,
         placedAt: dados.data || undefined,
+        // Quando esta venda virou REMESSA. E a data que o filtro de periodo
+        // usa: um pedido de domingo faturado na segunda saiu do armazem junto
+        // com os de segunda, e e ali que a operacao espera encontra-lo.
+        notaEmitidaEm: nota?.emissao || undefined,
         previsaoEntrega: detalhe?.dataPrevista || undefined,
         natureza: nota?.natureza || undefined,
         bonificacao: nota?.bonificacao || undefined,
@@ -450,6 +454,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
       notaFiscal: nota.numero,
       canonicoDaNota: true,
       placedAt: nota.emissao || undefined,
+      notaEmitidaEm: nota.emissao || undefined,
       temNota: true,
       carrierStatus: nota.entregaDescricao || undefined,
       carrierSeverity: nota.entregaDescricao
