@@ -4,9 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quadro de Pedidos &middot; Vita Pet Life</title>
+  <!-- Tamanhos feitos um a um, e nao um arquivo grande que o navegador reduz:
+       a aba usa 16 ou 32px, e e nesse tamanho que o icone precisa estar nitido. -->
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
   <link rel="icon" type="image/png" sizes="256x256" href="favicon.png">
-  <link rel="apple-touch-icon" href="favicon.png">
+  <!-- O do iOS e um arquivo proprio, sem cantos arredondados: o sistema recorta
+       sozinho, e um PNG ja recortado ganha cantos pretos por cima. -->
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
