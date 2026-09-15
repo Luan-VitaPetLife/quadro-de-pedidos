@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { runSync } from "./sync.js";
+import { sincronizarWms, pulsarSessaoWms } from "./lib/wms.js";
 
 /**
  * Monta uma expressao cron valida a partir de um intervalo em MINUTOS.
@@ -81,6 +82,14 @@ export function startScheduler() {
     await rodarBling();
     await runSync().catch((err) => console.error("[scheduler] erro na sincronizacao:", err));
 
+    // O WMS, que ate agora so entrava no quadro quando alguem rodava o script
+    // na propria maquina. Vem depois do Bling pelo mesmo motivo que a Mandae:
+    // o WMS nao cria quadrado, so preenche o de um pedido que o Bling ja
+    // conhece -- lido antes, o status do armazem chegaria antes do pedido.
+    //
+    // Nao lanca: sessao expirada e um estado normal aqui, e o quadro mostra.
+    await sincronizarWms({ dias: Number(process.env.BLING_DIAS || 60) });
+
     // Por ultimo, o quadro olhando pra si mesmo: dois quadrados que dividem a
     // mesma nota ou o mesmo codigo de rastreio sao a mesma remessa, e isso se
     // decide sem consultar ninguem. Fica no fim porque as duas etapas acima
@@ -103,7 +112,26 @@ export function startScheduler() {
     ciclo();
   });
 
-  // Devolvido pra que o encerramento gracioso consiga parar o timer -- sem
+  // O pulso da sessao da FontesLog, num relogio proprio e muito mais rapido que
+  // o ciclo.
+  //
+  // Precisa ser separado porque as duas coisas medem tempos diferentes: o ciclo
+  // e caro e roda de 2 em 2 horas, mas a sessao do portal morre por inatividade
+  // em ~20 minutos. Sem este pulso, ela expiraria sozinha entre um ciclo e
+  // outro e o login manual viraria rotina diaria -- que e exatamente o problema
+  // que isto veio resolver. Dez minutos da margem folgada para um pedido perdido
+  // sem chegar perto do limite.
+  // Preso entre 1 e 30 de proposito: acima de 30 nao adianta nada (a sessao ja
+  // teria morrido na janela de ~20 minutos), e um valor invalido no ambiente nao
+  // pode virar uma expressao cron quebrada que derruba a subida do servidor.
+  const pedido = Number(process.env.WMS_PULSO_MINUTOS);
+  const minutosDoPulso = Number.isFinite(pedido) && pedido >= 1 ? Math.min(30, Math.floor(pedido)) : 10;
+  const pulso = cron.schedule(`*/${minutosDoPulso} * * * *`, () => {
+    pulsarSessaoWms().catch((err) => console.error("[wms] erro no pulso:", err.message));
+  });
+  console.log(`[scheduler] sessao da FontesLog sera mantida viva a cada ${minutosDoPulso} minuto(s).`);
+
+  // Devolvidos pra que o encerramento gracioso consiga parar os timers -- sem
   // isso o cron segura o processo vivo e o desligamento estoura o prazo.
-  return tarefa;
+  return { stop: () => { tarefa.stop(); pulso.stop(); } };
 }

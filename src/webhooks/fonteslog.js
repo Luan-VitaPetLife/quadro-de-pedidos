@@ -1,14 +1,18 @@
 // Recebe no quadro os pedidos lidos do WMS da FontesLog.
 //
-// Por que existe uma rota em vez de gravar direto no banco: o portal da
-// FontesLog exige login manual (reCAPTCHA), entao a leitura roda na maquina de
-// quem opera -- nao no Railway, que nao tem navegador nem sessao. O script
-// local le o portal e empurra o resultado pra ca por esta rota.
+// HOJE o caminho normal e outro: o proprio servidor le o portal a cada ciclo
+// (ver lib/wms.js e o agendador). Esta rota continua existindo porque e util
+// quando o servidor esta sem sessao valida e alguem quer empurrar uma leitura
+// feita na propria maquina -- e porque quebrar uma entrada que ja funciona, sem
+// precisar, nao melhora nada.
+//
+// A gravacao em si mora em lib/wms.js, a mesma que o agendador usa: se as duas
+// entradas tivessem codigo proprio, o quadro mostraria coisas diferentes
+// dependendo de quem leu.
 //
 // Autenticacao: o mesmo MANDAE_WEBHOOK_SECRET, por header ou ?s= na URL.
 
-import { upsertOrder } from "../lib/db.js";
-import { mapFontesLogStatus } from "../lib/statusMapping.js";
+import { gravarPedidosWms } from "../lib/wms.js";
 import { verifyMandaeWebhook } from "./mandae.js";
 
 // POST /webhooks/fonteslog
@@ -23,47 +27,10 @@ export async function handleFontesLog(req, res) {
     return res.status(400).json({ error: "esperado { pedidos: [...] }" });
   }
 
-  let gravados = 0;
-  const ignorados = [];
-  // O WMS nao cria pedido: ele so sabe de remessas que o Bling ja mandou pra
-  // ele. Numero que nao casa com nada vira orfao, e o pente fino mostra.
-  const naoCasaram = [];
-
-  for (const p of pedidos) {
-    const orderNumber = String(p.numeroPedido || "").trim();
-    if (!orderNumber) {
-      ignorados.push(p);
-      continue;
-    }
-
-    // So mandamos os campos do WMS. O db.js recalcula a cor final combinando
-    // com o que a Mandae ja souber do mesmo pedido -- e por isso que o pedido
-    // aparece como UM quadrado, e nao dois.
-    // A severidade pode vir decidida da origem (`severidade`). Isso existe
-    // porque as telas de Parados e Rejeitados trazem um MOTIVO em texto livre,
-    // que vai junto no rotulo -- e deduzir a cor de um texto livre e pedir
-    // acidente: "PARADO: falta de estoque" casaria com a regra de "falta" e
-    // viraria vermelho, quando parado e amarelo. Quem leu a tela sabe a cor;
-    // mapFontesLogStatus fica so para o status seco do rastreamento.
-    const gravou = upsertOrder({
-      orderNumber,
-      wmsStatus: p.status || null,
-      notaFiscal: p.notaFiscal || undefined,
-      wmsSeverity: p.severidade || mapFontesLogStatus(p.status),
-      lastEventAt: p.ultimoMovimento || undefined,
-      // "ATB0240367" e nome que so existe dentro do portal da FontesLog. Se a
-      // nota dessa remessa ja tem quadrado, e nele que este status entra --
-      // senao o mesmo pedido aparece duas vezes, um lado com o status do
-      // armazem e outro com o rastreio, cada um contando metade da historia.
-      numeroProvisorio: true,
-      fonte: "wms",
-    });
-    if (gravou) gravados++;
-    else naoCasaram.push(orderNumber);
-  }
+  const { gravados, naoCasaram, ignorados } = gravarPedidosWms(pedidos);
 
   console.log(
-    `[webhook] fonteslog: ${gravados} pedido(s) atualizado(s), ${naoCasaram.length} sem pedido correspondente, ${ignorados.length} ignorado(s).`
+    `[webhook] fonteslog: ${gravados} pedido(s) atualizado(s), ${naoCasaram.length} sem pedido correspondente, ${ignorados} ignorado(s).`
   );
-  res.status(200).json({ ok: true, gravados, semCorrespondencia: naoCasaram.length, ignorados: ignorados.length });
+  res.status(200).json({ ok: true, gravados, semCorrespondencia: naoCasaram.length, ignorados });
 }

@@ -782,3 +782,31 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
   -webkit-mask: var(--icone-relogio) center / contain no-repeat;
   mask: var(--icone-relogio) center / contain no-repeat;
 }
+
+/* O aviso de que o armazem parou de chegar.
+   Vermelho de verdade, largura inteira, acima do placar: quem abre o quadro
+   precisa ver isso ANTES de confiar nas cores dos quadrados. A variante "ameno"
+   e pra quando o portal esta fora do ar -- nao ha nada a fazer, entao nao
+   merece o mesmo alarme. */
+.avisoWms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid var(--erro-linha);
+  border-left: 4px solid var(--erro-forte);
+  border-radius: 8px;
+  background: var(--erro-fundo);
+  color: var(--erro);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.avisoWms strong { font-weight: 650; }
+.avisoWms.ameno {
+  border-color: var(--aviso-linha);
+  border-left-color: var(--aviso-forte);
+  background: var(--aviso-fundo);
+  color: var(--aviso);
+}

@@ -16,23 +16,68 @@
 //   - lista os links/menus encontrados, que e o que falta pra achar a tela de
 //     pedidos e escrever a consulta automatica
 //
-// A sessao vale ate o portal expirar o cookie. Quando expirar, e so rodar isso
-// de novo. NAO comite data/fonteslog-sessao.json -- ela vale como sua senha.
+// Ao final, a sessao e ENVIADA AO QUADRO (BOARD_URL), e e ali que ela passa a
+// trabalhar: o servidor le o portal a cada ciclo e mantem a sessao viva com um
+// pulso de poucos minutos. Por isso voce nao precisa mais ficar na frente do
+// computador -- e nem estar na mesma maquina da proxima vez. Rode isto de onde
+// estiver, resolva o captcha, e o quadro volta a ler sozinho.
+//
+// A sessao vale ate o portal expirar o cookie. Quando expirar, o quadro avisa
+// em cima da tela. NAO comite data/fonteslog-sessao.json -- ela vale como sua senha.
 
 import "dotenv/config";
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CAMINHO_SESSAO } from "./integrations/fonteslog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, "..", "data");
-const debugDir = path.join(dataDir, "fonteslog-debug");
-export const CAMINHO_SESSAO = path.join(dataDir, "fonteslog-sessao.json");
+const debugDir = path.join(__dirname, "..", "data", "fonteslog-debug");
 
 fs.mkdirSync(debugDir, { recursive: true });
 
 const ESPERA_MAX_MS = 5 * 60 * 1000; // 5 minutos pra voce logar com calma
+
+/**
+ * Manda a sessao recem-criada pro quadro.
+ *
+ * Sem isto, a sessao ficaria so nesta maquina -- e uma sessao que so existe
+ * aqui obriga alguem a estar aqui. Depois deste envio, quem le o portal e o
+ * servidor, sozinho, ate a sessao expirar.
+ */
+async function enviarAoQuadro() {
+  const boardUrl = (process.env.BOARD_URL || "").replace(/\/+$/, "");
+  const segredo = process.env.MANDAE_WEBHOOK_SECRET;
+
+  if (!boardUrl || !segredo) {
+    console.log("\nBOARD_URL ou MANDAE_WEBHOOK_SECRET vazios no .env: a sessao ficou so nesta maquina.");
+    console.log("Preencha os dois pra que o quadro passe a ler o WMS sozinho.\n");
+    return;
+  }
+
+  const estado = JSON.parse(fs.readFileSync(CAMINHO_SESSAO, "utf-8"));
+  console.log(`\nEntregando a sessao a ${boardUrl} ...`);
+
+  try {
+    const res = await fetch(`${boardUrl}/api/fonteslog/sessao?s=${encodeURIComponent(segredo)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(estado),
+    });
+    const corpo = await res.text();
+    if (!res.ok) {
+      console.error(`\nO quadro recusou a sessao (HTTP ${res.status}): ${corpo}`);
+      console.error("A sessao continua salva aqui; da pra usar `npm run sync-fonteslog` enquanto isso.\n");
+      return;
+    }
+    console.log("\nPronto. O quadro ja esta lendo o WMS sozinho, e vai manter essa sessao viva.");
+    console.log("Voce so precisa repetir isto quando o quadro avisar que a sessao caiu.\n");
+  } catch (err) {
+    console.error(`\nNao consegui falar com o quadro: ${err.message}`);
+    console.error("A sessao continua salva aqui; da pra usar `npm run sync-fonteslog` enquanto isso.\n");
+  }
+}
 
 async function main() {
   const url = process.env.FONTESLOG_URL;
@@ -118,8 +163,8 @@ async function main() {
       console.log(`  ${String(l.texto).slice(0, 45).padEnd(47)} ${l.href}`);
     }
 
-    console.log("\nPronto. Me mande o print da tela e a lista de links acima --");
-    console.log("com isso eu escrevo a consulta automatica dos pedidos.\n");
+    // ---- entrega a sessao ao quadro: e o passo que tira voce do circuito ----
+    await enviarAoQuadro();
   } finally {
     await browser.close();
   }

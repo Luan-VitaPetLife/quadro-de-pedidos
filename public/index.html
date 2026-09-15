@@ -27,6 +27,16 @@
       </div>
     </header>
 
+    <!-- O aviso do WMS. Fica escondido enquanto esta tudo bem, e so aparece
+         quando o quadro PAROU de receber o armazem -- normalmente porque a
+         sessao da FontesLog caiu e o portal exige um captcha pra renovar.
+         Existe porque dado velho sem aviso e pior do que dado nenhum: os
+         quadrados continuariam verdes e ninguem iria olhar. -->
+    <div class="avisoWms" id="avisoWms" hidden>
+      <strong id="avisoWmsTitulo"></strong>
+      <span id="avisoWmsTexto"></span>
+    </div>
+
     <!-- Placar: uma faixa, não quatro cartões. O total é contexto; o que
          importa é quantos precisam de ação. -->
     <div class="placar">
