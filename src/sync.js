@@ -90,9 +90,35 @@ async function reconcileOneOrder(order) {
   }
 }
 
-export async function runSync() {
-  const orders = listOrders();
-  console.log(`[sync] reconciliando ${orders.length} pedido(s) conhecido(s) com a Mandaê...`);
+/**
+ * Reconsulta a Mandae.
+ *
+ * Sem `apenas`, percorre o quadro inteiro -- e o que a varredura de 2 horas faz,
+ * e e caro: uma chamada por pedido com rastreio da Mandae, centenas deles.
+ *
+ * Com `apenas`, olha so os pedidos indicados. Isso existe porque a via rapida
+ * roda de minutos em minutos: reconciliar o quadro todo nessa frequencia seriam
+ * milhares de chamadas por hora a uma API que nao e nossa, para reperguntar
+ * sobre pedidos que ninguem mexeu. Quem acabou de mudar e quem precisa de
+ * resposta nova.
+ *
+ * @param {{apenas?: string[]|null}} opcoes
+ */
+export async function runSync({ apenas = null } = {}) {
+  const todos = listOrders();
+  const orders = apenas
+    ? (() => {
+        const querido = new Set(apenas.map((n) => String(n)));
+        return todos.filter((o) => querido.has(String(o.orderNumber)));
+      })()
+    : todos;
+
+  if (apenas && !orders.length) return; // nada mudou: nem vale o carimbo
+  console.log(
+    apenas
+      ? `[sync] reconciliando ${orders.length} pedido(s) que acabaram de mudar...`
+      : `[sync] reconciliando ${orders.length} pedido(s) conhecido(s) com a Mandaê...`
+  );
   for (const order of orders) {
     await reconcileOneOrder(order);
   }

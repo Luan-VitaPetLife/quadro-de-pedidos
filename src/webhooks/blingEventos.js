@@ -84,11 +84,15 @@ async function lerOQueMudou() {
   // de ordem e com atraso (o Bling reentrega por ate 3 dias). Uma janela curta
   // demais deixaria passar justamente o evento atrasado.
   const desde = momentoNoBling(new Date(Date.now() - 15 * 60000));
-  const { rodou } = await comTravaDeSincronizacao(() => runSyncBling({ alteradosDesde: desde }));
+  const { rodou, resultado } = await comTravaDeSincronizacao(() => runSyncBling({ alteradosDesde: desde }));
   if (!rodou) return false;
 
-  const { runSync } = await import("../sync.js");
-  await runSync().catch((err) => console.error("[bling-webhook] Mandae:", err.message));
+  // So os pedidos que esta leitura mexeu -- ver o mesmo cuidado no scheduler.
+  const tocados = resultado?.tocados || [];
+  if (tocados.length) {
+    const { runSync } = await import("../sync.js");
+    await runSync({ apenas: tocados }).catch((err) => console.error("[bling-webhook] Mandae:", err.message));
+  }
   return true;
 }
 
