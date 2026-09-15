@@ -223,8 +223,21 @@ function fmtDia(iso) {
 
 // A data que manda é a do PEDIDO, não a do último evento: "pedidos de hoje"
 // quer dizer feitos hoje.
+// A data que o filtro de período usa.
+//
+// A emissão da NOTA vem primeiro, e não a data do pedido. O motivo é o critério
+// da própria operação: a NF de saída é o momento em que aquilo vira remessa e
+// vai pro armazém -- antes dela, o que está no pedido ainda não é uma entrega.
+//
+// Na prática: um pedido de domingo faturado na segunda saiu junto com os de
+// segunda, e é em segunda que quem opera vai procurá-lo. Foi o caso das notas
+// 296 e 297, emitidas às 09:04 do mesmo dia e mostradas em dias diferentes
+// porque uma das compras tinha sido feita na véspera.
+//
+// Sem nota, cai na data do pedido: aí não há remessa ainda, e o que existe para
+// datar é mesmo a compra.
 function dataDoPedido(o) {
-  return (o.placedAt || o.lastEventAt || "").slice(0, 10);
+  return (o.notaEmitidaEm || o.placedAt || o.lastEventAt || "").slice(0, 10);
 }
 
 function hojeISO(deslocamento = 0) {

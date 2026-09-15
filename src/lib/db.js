@@ -35,6 +35,7 @@ db.exec(`
     bonificacao INTEGER,
     natureza TEXT,
     previsao_entrega TEXT,
+    nota_emitida_em TEXT,
     tem_nota INTEGER,
     nota_fiscal TEXT,
     coleta_prevista TEXT,
@@ -64,6 +65,14 @@ if (!existingCols.includes("carrier_severity")) {
 if (!existingCols.includes("bonificacao")) db.exec("ALTER TABLE orders ADD COLUMN bonificacao INTEGER");
 if (!existingCols.includes("natureza")) db.exec("ALTER TABLE orders ADD COLUMN natureza TEXT");
 if (!existingCols.includes("previsao_entrega")) db.exec("ALTER TABLE orders ADD COLUMN previsao_entrega TEXT");
+// Quando a NOTA foi emitida -- e nao quando o cliente comprou.
+//
+// E essa a data que o filtro de periodo usa, porque e ela que marca o momento
+// em que o pedido virou REMESSA e foi pro armazem. Sem isso, um pedido de
+// domingo faturado na segunda aparecia no domingo, separado das remessas que
+// sairam junto com ele -- foi o caso das notas 296 e 297, emitidas as 09:04 do
+// mesmo dia e mostradas em dias diferentes.
+if (!existingCols.includes("nota_emitida_em")) db.exec("ALTER TABLE orders ADD COLUMN nota_emitida_em TEXT");
 if (!existingCols.includes("tem_nota")) db.exec("ALTER TABLE orders ADD COLUMN tem_nota INTEGER");
 // Numero da nota fiscal -- o WMS mostra "000000246 - 001" e e por esse numero
 // que a operacao acha a nota no Bling. Sem ele, achar a nota do pedido vira
@@ -317,6 +326,9 @@ function rowToOrder(r) {
     bonificacao: r.bonificacao === 1,
     natureza: r.natureza,
     previsaoEntrega: r.previsao_entrega,
+    // QUANDO a nota foi emitida -- o momento em que a venda virou remessa.
+    // E a data pela qual o quadro agrupa por periodo.
+    notaEmitidaEm: r.nota_emitida_em,
     // Nota emitida separa "ainda nao faturado" de "a caminho" -- a regra de
     // prazo muda de sentido conforme isso.
     temNota: r.tem_nota === 1,
@@ -341,11 +353,11 @@ export function getOrder(orderNumber) {
 const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
-    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, tem_nota, nota_fiscal, coleta_prevista, apelidos,
+    carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, nota_emitida_em, tem_nota, nota_fiscal, coleta_prevista, apelidos,
     tracking_code, city, placed_at, last_event_at, rastreio_desconhecido, ultimo_movimento_at, situacao_bling, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
-    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @temNota, @notaFiscal, @coletaPrevista, @apelidos,
+    @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @notaEmitidaEm, @temNota, @notaFiscal, @coletaPrevista, @apelidos,
     @trackingCode, @city, @placedAt, @lastEventAt, @rastreioDesconhecido, @ultimoMovimentoAt, @situacaoBling, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
@@ -359,6 +371,7 @@ const upsertStmt = db.prepare(`
     bonificacao = excluded.bonificacao,
     natureza = excluded.natureza,
     previsao_entrega = excluded.previsao_entrega,
+    nota_emitida_em = excluded.nota_emitida_em,
     tem_nota = excluded.tem_nota,
     nota_fiscal = excluded.nota_fiscal,
     coleta_prevista = excluded.coleta_prevista,
@@ -640,6 +653,7 @@ export function upsertOrder(partial, { permitirCriacao = false } = {}) {
     bonificacao: partial.bonificacao !== undefined ? (partial.bonificacao ? 1 : 0) : (existing.bonificacao ? 1 : 0),
     natureza: partial.natureza ?? existing.natureza ?? null,
     previsaoEntrega: partial.previsaoEntrega ?? existing.previsaoEntrega ?? null,
+    notaEmitidaEm: partial.notaEmitidaEm ?? existing.notaEmitidaEm ?? null,
     notaFiscal: partial.notaFiscal ?? existing.notaFiscal ?? null,
     coletaPrevista: partial.coletaPrevista !== undefined ? partial.coletaPrevista : existing.coletaPrevista ?? null,
     // O codigo recusado acima nao se perde: vira apelido, entao quem tiver ele
@@ -792,7 +806,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
     const preencher = {};
 
     for (const campo of [
-      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaFiscal", "coletaPrevista",
+      "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaEmitidaEm", "notaFiscal", "coletaPrevista",
       "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
     ]) {
       const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
