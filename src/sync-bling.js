@@ -63,7 +63,24 @@ function jaSabidoEEncerrado(numeroNota, indice) {
   return false;
 }
 
-async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
+/**
+ * A nota ja esta representada no quadro, com nota e tudo?
+ *
+ * Usado so pela via rapida. O trabalho dela e NOVIDADE, nao atualizacao: o que
+ * o quadro ja sabe e a varredura de 2 horas que confere. Sem este corte, cada
+ * rodada releria as mesmas dezenas de notas recentes -- duas chamadas cada, de
+ * tres em tres minutos, para reescrever exatamente o que ja estava la.
+ */
+function jaRepresentadaNoQuadro(numeroNota, indice) {
+  const chave = chaveNota(numeroNota);
+  if (!chave) return false;
+  for (const numero of indice.get(chave) || []) {
+    if (getOrder(numero)?.temNota) return true;
+  }
+  return false;
+}
+
+async function lerNotas({ dataDe, dataAte, marcar = () => {}, apenasNovas = false }) {
   const naturezas = await naturezasDeOperacao();
   const lista = await listarNotas({ dataDe, dataAte });
   marcar(`${lista.length} notas na listagem`);
@@ -77,16 +94,23 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {} }) {
   for (const n of lista) {
     if (++lidas % 25 === 0) marcar(`nota ${lidas}/${lista.length} (${puladas} ja encerradas)`);
 
-    // Nota de remessa ja entregue e ja conhecida: entra no mapa marcada como
-    // PULADA, sem gastar as duas chamadas.
+    // Duas razoes para nao gastar as duas chamadas desta nota:
     //
-    // Marcada, e nao ausente: se ela sumisse do mapa, o pedido que a referencia
-    // seria lido como "pedido sem nota" -- e ai o codigo de rastreio seria
-    // apagado como autoritativo e o temNota cairia. A economia teria destruido
-    // justamente os quadrados que ja estavam certos.
+    //   ja entregue e ja conhecida  -- nada mudaria
+    //   ja representada no quadro   -- so na via rapida, cujo trabalho e
+    //                                  NOVIDADE; atualizar e da varredura
+    //
+    // Nos dois casos ela entra no mapa MARCADA, nunca ausente. Se sumisse, o
+    // pedido que a referencia seria lido como "pedido sem nota" -- e ai o
+    // codigo de rastreio dele seria apagado como autoritativo e o temNota
+    // cairia. A economia teria destruido justamente os quadrados que ja
+    // estavam certos.
+    //
     // Nota sem valor nunca e pulada: ela existe pra ser DESMONTADA.
     const valeEsta = notaVale(n.situacao);
-    if (valeEsta && jaSabidoEEncerrado(n.numero, indiceDeNotas)) {
+    const pular = valeEsta && (jaSabidoEEncerrado(n.numero, indiceDeNotas) ||
+      (apenasNovas && jaRepresentadaNoQuadro(n.numero, indiceDeNotas)));
+    if (pular) {
       puladas++;
       porId.set(String(n.id), {
         id: String(n.id),
@@ -221,7 +245,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
   const marcar = (etapa) => setMeta("sincronizacaoEtapa", `${etapa} @ ${new Date().toISOString()}`);
 
   marcar("lendo notas");
-  const notas = await lerNotas({ dataDe: inicioDaNota, dataAte: hoje, marcar });
+  const notas = await lerNotas({ dataDe: inicioDaNota, dataAte: hoje, marcar, apenasNovas: incremental });
 
   marcar(`${notas.size} notas lidas; listando pedidos`);
   const lista = incremental
