@@ -21,10 +21,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { dataDir } from "../lib/pastaDeDados.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const CAMINHO_SESSAO = path.join(__dirname, "..", "..", "data", "fonteslog-sessao.json");
+// A sessao mora junto do banco, e nao mais na pasta data/ do codigo. O motivo e
+// que ela precisa existir ONDE O QUADRO RODA: no Railway isso e o Volume, o
+// unico lugar que sobrevive ao deploy. Enquanto ela so existia na maquina de
+// quem operava, o servidor nao tinha como ler o WMS sozinho -- era isso que
+// obrigava alguem a estar na frente do computador.
+export const CAMINHO_SESSAO = path.join(dataDir, "fonteslog-sessao.json");
 
 const BASE = () => (process.env.FONTESLOG_URL || "http://portalfonteslog.ddsinformatica.com.br").replace(/\/+$/, "");
 const ID_CLIENTE = () => process.env.FONTESLOG_ID_CLIENTE || "389";
@@ -42,6 +46,70 @@ export function carregarCookies() {
     throw new Error("A sessao salva nao tem cookie do portal FontesLog. Rode `npm run fonteslog-login` de novo.");
   }
   return doPortal.map((c) => `${c.name}=${c.value}`).join("; ");
+}
+
+/** Ha uma sessao salva? (nao diz se ela ainda vale -- pra isso, `conferirSessao`) */
+export function temSessao() {
+  return fs.existsSync(CAMINHO_SESSAO);
+}
+
+/** Quando a sessao salva foi gravada. */
+export function sessaoGravadaEm() {
+  if (!temSessao()) return null;
+  return fs.statSync(CAMINHO_SESSAO).mtime.toISOString();
+}
+
+/**
+ * Grava a sessao que veio do login manual.
+ *
+ * Recusa o que nao tem cookie do portal. Isso importa mais do que parece: quem
+ * chama isto e o envio de uma sessao nova, e sobrescrever uma sessao QUE FUNCIONA
+ * com um arquivo vazio derrubaria a leitura do WMS ate alguem perceber -- um
+ * login que deu errado nao pode ter o poder de apagar um login que deu certo.
+ *
+ * @param {{cookies?: Array<{name: string, value: string, domain: string}>}} estado
+ */
+export function salvarSessao(estado) {
+  const cookies = (estado?.cookies || []).filter((c) => String(c?.domain || "").includes("ddsinformatica"));
+  if (!cookies.length) throw new Error("SESSAO_SEM_COOKIE_DO_PORTAL");
+  fs.writeFileSync(CAMINHO_SESSAO, JSON.stringify(estado, null, 2), "utf-8");
+  return cookies.length;
+}
+
+/**
+ * Bate no portal pra saber se a sessao salva ainda esta de pe.
+ *
+ * Alem de responder, ESSE PEDIDO SEGURA A SESSAO VIVA -- e o mecanismo inteiro
+ * da automacao. O cookie do portal (`ASP.NET_SessionId`) nao tem data de
+ * validade: quem decide quando ele morre e o servidor, por inatividade, na
+ * janela padrao de 20 minutos. Enquanto alguem pedir uma tela de tempos em
+ * tempos, a janela e reiniciada e a sessao nao expira. Foi isso que transformou
+ * "vale por 20 minutos" em "vale por dias".
+ *
+ * @returns {Promise<{viva: boolean, motivo?: string}>}
+ */
+export async function conferirSessao() {
+  if (!temSessao()) return { viva: false, motivo: "nenhuma sessao salva" };
+  try {
+    // A tela mais barata que existe atras do login: um dia so, sem resultado.
+    const hoje = paraISO(new Date());
+    await buscarTela("/Pedido/Rastreamento", {
+      idCliente: ID_CLIENTE(),
+      idTransportadora: "0",
+      dataDe: hoje,
+      dataAte: hoje,
+      tipoData: "Recepcao",
+      numeroPedido: "0",
+      numeroNfe: "0",
+      statusPedido: "TODOS",
+    });
+    return { viva: true };
+  } catch (err) {
+    if (err.message === "SESSAO_EXPIRADA") return { viva: false, motivo: "sessao expirada" };
+    // Portal fora do ar nao e sessao morta. Confundir os dois faria o quadro
+    // pedir um login manual que nao resolveria nada.
+    return { viva: false, motivo: `portal indisponivel: ${err.message}`, indisponivel: true };
+  }
 }
 
 // O portal e ASP.NET e escapa acento como entidade numerica: "PROJETO NATÁLIA"

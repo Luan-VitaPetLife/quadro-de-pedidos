@@ -130,8 +130,61 @@ app.post("/api/reconstruir", async (req, res) => {
   }
 });
 
-app.get("/api/meta", (req, res) => {
-  res.json({ lastSyncAt: getMeta("lastSyncAt") });
+// POST /api/fonteslog/sessao?s=<segredo>   corpo: o storageState do Playwright
+//
+// E por aqui que o login manual chega ao servidor. O captcha exige uma pessoa,
+// mas exige uma pessoa UMA VEZ -- depois disso quem le o portal e o quadro, a
+// cada ciclo, com o pulso segurando a sessao viva. Sem esta rota a sessao ficava
+// presa na maquina de quem logou, e era isso que obrigava alguem a estar aqui.
+//
+// A sessao vale como senha: so entra com o segredo, e so por HTTPS.
+app.post("/api/fonteslog/sessao", express.json({ limit: "1mb" }), async (req, res) => {
+  const esperado = process.env.MANDAE_WEBHOOK_SECRET;
+  if (esperado && req.query?.s !== esperado) return res.status(401).json({ error: "segredo invalido" });
+
+  const { CAMINHO_SESSAO, salvarSessao, conferirSessao } = await import("./integrations/fonteslog.js");
+  const fs = await import("node:fs");
+
+  // Guarda a que esta valendo ANTES de escrever por cima.
+  //
+  // Um login que deu errado nao pode derrubar um login que deu certo: se a
+  // sessao nova nao passar no teste, a antiga volta e o quadro continua lendo.
+  // Sem isso, um envio ruim deixaria o WMS parado ate alguem reparar.
+  const anterior = fs.existsSync(CAMINHO_SESSAO) ? fs.readFileSync(CAMINHO_SESSAO) : null;
+
+  try {
+    salvarSessao(req.body);
+  } catch (err) {
+    if (err.message === "SESSAO_SEM_COOKIE_DO_PORTAL") {
+      return res.status(400).json({ error: "essa sessao nao tem cookie do portal FontesLog" });
+    }
+    throw err;
+  }
+
+  const teste = await conferirSessao();
+  if (!teste.viva) {
+    if (anterior) fs.writeFileSync(CAMINHO_SESSAO, anterior);
+    else fs.rmSync(CAMINHO_SESSAO, { force: true });
+    return res.status(400).json({
+      error: "a sessao enviada nao abre o portal",
+      detalhe: teste.motivo,
+      anteriorRestaurada: !!anterior,
+    });
+  }
+
+  res.json({ ok: true, valendo: true, lendoAgora: true });
+
+  // Le na hora, sem esperar o proximo ciclo: quem acabou de logar esta olhando
+  // o quadro pra ver se funcionou.
+  const { sincronizarWms } = await import("./lib/wms.js");
+  sincronizarWms({ dias: Number(process.env.BLING_DIAS || 60) }).catch((err) =>
+    console.error("[wms] leitura pos-login falhou:", err.message)
+  );
+});
+
+app.get("/api/meta", async (req, res) => {
+  const { estadoDoWms } = await import("./lib/wms.js");
+  res.json({ lastSyncAt: getMeta("lastSyncAt"), wms: estadoDoWms() });
 });
 
 // Botao "Sincronizar agora" do quadro -- forca a reconciliacao de reforco

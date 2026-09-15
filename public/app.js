@@ -885,6 +885,55 @@ document.addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 // Dados
 // ---------------------------------------------------------------------------
+
+/**
+ * Avisa quando o armazem parou de chegar no quadro.
+ *
+ * O quadro le o WMS sozinho, mas a sessao do portal da FontesLog cai de tempos
+ * em tempos e so uma pessoa consegue renova-la -- o portal pede captcha, que
+ * existe justamente pra barrar robo. Quando isso acontece, os quadrados
+ * continuam ali com o ultimo status conhecido, e e ai que mora o perigo: sem
+ * este aviso, um pedido travado no armazem ontem seguiria verde hoje.
+ *
+ * Portal fora do ar e tratado a parte, e de proposito: nao adianta mandar
+ * alguem logar quando o problema e do outro lado.
+ */
+function mostrarAvisoDoWms(wms) {
+  const caixa = document.getElementById("avisoWms");
+  if (!caixa) return;
+  if (!wms || wms.estado === "ok") {
+    caixa.hidden = true;
+    return;
+  }
+
+  const titulo = document.getElementById("avisoWmsTitulo");
+  const texto = document.getElementById("avisoWmsTexto");
+  const desde = wms.desde ? ` desde ${fmtData(wms.desde)}` : "";
+
+  if (wms.estado === "indisponivel") {
+    caixa.className = "avisoWms ameno";
+    titulo.textContent = "O portal do armazém não está respondendo.";
+    texto.textContent = `Os status do WMS estão parados${desde}. Não é nada que você precise fazer — quando o portal voltar, o quadro volta a ler sozinho.`;
+  } else if (wms.estado === "ausente") {
+    // Nunca houve login NESTE servidor -- o caso do primeiro deploy, e de um
+    // volume novo. Dizer "a sessão caiu" aqui seria mentira, e mandaria a pessoa
+    // procurar um problema que nao existe.
+    caixa.className = "avisoWms";
+    titulo.textContent = "O quadro ainda não tem acesso ao armazém.";
+    texto.textContent =
+      "Falta o primeiro login na FontesLog. Rode `npm run fonteslog-login`, resolva o captcha," +
+      " e daí em diante o quadro lê o WMS sozinho.";
+  } else {
+    caixa.className = "avisoWms";
+    titulo.textContent = "O quadro parou de receber o armazém.";
+    const ultima = wms.ultimaLeituraEm ? ` A última leitura foi ${fmtData(wms.ultimaLeituraEm)}.` : "";
+    texto.textContent =
+      `A sessão da FontesLog caiu${desde} e o portal exige um captcha pra renovar.${ultima}` +
+      " Rode `npm run fonteslog-login`, resolva o captcha, e o quadro volta a ler sozinho.";
+  }
+  caixa.hidden = false;
+}
+
 async function poll() {
   const linha = document.getElementById("syncLine");
   try {
@@ -893,8 +942,9 @@ async function poll() {
     const corpo = await pedidos.json();
     state.orders = corpo.orders || [];
     state.ocultos = corpo.ocultos || 0;
-    const { lastSyncAt } = await meta.json();
+    const { lastSyncAt, wms } = await meta.json();
     render();
+    mostrarAvisoDoWms(wms);
     if (state.selectedId) abrirPainel(state.selectedId);
     linha.textContent = lastSyncAt ? `Sincronizado ${fmtData(lastSyncAt)}` : "Aguardando primeira sincronização";
   } catch {
