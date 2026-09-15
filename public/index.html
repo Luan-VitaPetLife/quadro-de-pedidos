@@ -113,6 +113,13 @@
   </div>
 
   <!-- Personalização -->
+  <!-- Personalizar. Mesmo vocabulário do painel de pedido -- grade de colunas
+       e seções com título -- para os dois parecerem o mesmo sistema, e não duas
+       telas feitas em épocas diferentes.
+
+       A legenda fica FORA da grade, ocupando a largura inteira: são cinco campos
+       de texto, e espremidos numa coluna eles empurravam tudo para baixo e
+       criavam o scroll que não deveria existir numa tela de ajustes. -->
   <div class="cortina" id="configBackdrop">
     <div class="painel config" role="dialog" aria-label="Personalizar o quadro">
       <div class="ph">
@@ -120,63 +127,71 @@
         <button class="fechar" id="configFechar" aria-label="Fechar">&times;</button>
       </div>
 
-      <div class="opcao">
-        <label for="optTamanho">Tamanho dos cartões</label>
-        <div class="segmentado" id="optTamanho">
-          <button class="seg" data-tamanho="p">Pequeno</button>
-          <button class="seg" data-tamanho="m" data-active="true">Médio</button>
-          <button class="seg" data-tamanho="g">Grande</button>
-          <button class="seg" data-tamanho="tv">TV</button>
+      <div class="grade">
+        <div class="coluna">
+          <section class="bloco">
+            <h3>Aparência dos cartões</h3>
+
+            <div class="opcao">
+              <label for="optTamanho">Tamanho</label>
+              <div class="segmentado" id="optTamanho">
+                <button class="seg" data-tamanho="p">Pequeno</button>
+                <button class="seg" data-tamanho="m" data-active="true">Médio</button>
+                <button class="seg" data-tamanho="g">Grande</button>
+                <button class="seg" data-tamanho="tv">TV</button>
+              </div>
+            </div>
+
+            <div class="opcao">
+              <label for="optForma">Formato</label>
+              <div class="segmentado" id="optForma">
+                <button class="seg" data-forma="arredondado" data-active="true">Arredondado</button>
+                <button class="seg" data-forma="reto">Reto</button>
+                <button class="seg" data-forma="quadrado">Quadrado</button>
+                <button class="seg" data-forma="pilula">Pílula</button>
+                <button class="seg" data-forma="circulo">Círculo</button>
+              </div>
+            </div>
+
+            <div class="opcao">
+              <label>Intensidade da cor</label>
+              <div class="segmentado" id="optCor">
+                <button class="seg" data-cor="suave">Suave</button>
+                <button class="seg" data-cor="media" data-active="true">Média</button>
+                <button class="seg" data-cor="forte">Forte</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="coluna">
+          <section class="bloco">
+            <h3>O que aparece no cartão</h3>
+
+            <div class="opcao">
+              <label>Destaque</label>
+              <div class="segmentado" id="optPrincipal">
+                <button class="seg" data-principal="numero" data-active="true">Nº do pedido</button>
+                <button class="seg" data-principal="cliente">Cliente</button>
+                <button class="seg" data-principal="rastreio">Rastreio</button>
+              </div>
+              <p class="dica menor">É a linha grande, a que se lê de longe.</p>
+            </div>
+
+            <div class="opcao">
+              <label>Linhas menores</label>
+              <div class="caixas">
+                <label class="cx" for="optNumero"><input type="checkbox" id="optNumero"><span>Nº do pedido</span></label>
+                <label class="cx" for="optCliente"><input type="checkbox" id="optCliente"><span>Nome do cliente</span></label>
+                <label class="cx" for="optRastreio"><input type="checkbox" id="optRastreio" checked><span>Código de rastreio</span></label>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 
-      <div class="opcao">
-        <label for="optForma">Formato</label>
-        <div class="segmentado" id="optForma">
-          <button class="seg" data-forma="arredondado" data-active="true">Arredondado</button>
-          <button class="seg" data-forma="reto">Reto</button>
-          <button class="seg" data-forma="quadrado">Quadrado</button>
-          <button class="seg" data-forma="pilula">Pílula</button>
-          <button class="seg" data-forma="circulo">Círculo</button>
-        </div>
-      </div>
-
-      <div class="opcao">
-        <label>Intensidade da cor</label>
-        <div class="segmentado" id="optCor">
-          <button class="seg" data-cor="suave">Suave</button>
-          <button class="seg" data-cor="media" data-active="true">Média</button>
-          <button class="seg" data-cor="forte">Forte</button>
-        </div>
-      </div>
-
-      <div class="opcao">
-        <label>Destaque do cartão</label>
-        <div class="segmentado" id="optPrincipal">
-          <button class="seg" data-principal="numero" data-active="true">Nº do pedido</button>
-          <button class="seg" data-principal="cliente">Cliente</button>
-          <button class="seg" data-principal="rastreio">Rastreio</button>
-        </div>
-        <p class="dica menor">É a linha grande, a que se lê de longe. Os outros dois viram linhas menores, se você ligar abaixo.</p>
-      </div>
-
-      <div class="opcao linha">
-        <label for="optNumero">Mostrar nº do pedido</label>
-        <input type="checkbox" id="optNumero">
-      </div>
-
-      <div class="opcao linha">
-        <label for="optCliente">Mostrar nome do cliente</label>
-        <input type="checkbox" id="optCliente">
-      </div>
-
-      <div class="opcao linha">
-        <label for="optRastreio">Mostrar código de rastreio</label>
-        <input type="checkbox" id="optRastreio" checked>
-      </div>
-
-      <div class="opcao">
-        <label>Texto da legenda</label>
+      <section class="bloco larga">
+        <h3>Texto da legenda</h3>
         <div class="legenda-campos">
           <label class="lc"><i class="pt ok"></i><input type="text" id="legOk" maxlength="40"></label>
           <label class="lc"><i class="pt aviso"></i><input type="text" id="legAviso" maxlength="40"></label>
@@ -184,10 +199,12 @@
           <label class="lc"><i class="pt neutro"></i><input type="text" id="legTracejado" maxlength="40"></label>
           <label class="lc"><span class="lc-relogio"></span><input type="text" id="legRelogio" maxlength="40"></label>
         </div>
-      </div>
+      </section>
 
-      <p class="dica">As preferências ficam salvas neste navegador. <kbd>Esc</kbd> sai da tela cheia.</p>
-      <button class="btn largo" id="configPadrao" type="button">Restaurar padrão</button>
+      <div class="rodape-config">
+        <p class="dica">As preferências ficam salvas neste navegador. <kbd>Esc</kbd> sai da tela cheia.</p>
+        <button class="btn" id="configPadrao" type="button">Restaurar padrão</button>
+      </div>
     </div>
   </div>
 

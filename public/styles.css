@@ -457,7 +457,7 @@ kbd {
   border: 1px solid var(--linha);
 }
 @media (min-width: 640px) { .painel { border-radius: var(--raio); } }
-.painel.config { max-width: 480px; }
+.painel.config { max-width: 760px; }
 
 /* Largo o bastante para duas colunas, e nao mais do que isso: passar disso
    faria a linha de texto dos avisos ficar longa demais pra ler. */
@@ -758,7 +758,22 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
 .dica.menor { font-size: 11.5px; margin: 8px 0 0; }
 
 .legenda-campos { display: flex; flex-direction: column; gap: 7px; }
-.legenda-campos .lc { display: flex; align-items: center; gap: 9px; }
+/* Grade, e nao flex, por causa do alinhamento.
+   
+   Os icones tem tamanhos diferentes -- a bolinha tem 7px e o relogio 11px -- e
+   em flex cada campo comecava num ponto proprio: o do relogio ficava 4px mais
+   a direita que os outros quatro. Com uma coluna de largura FIXA, cada icone
+   tem a mesma casa e se centraliza nela, entao todos os campos comecam
+   exatamente no mesmo lugar, hoje e no dia em que entrar um icone de outro
+   tamanho. */
+.legenda-campos .lc {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  align-items: center;
+  justify-items: center;
+  gap: 9px;
+}
+.legenda-campos .lc > input { justify-self: stretch; }
 .legenda-campos .lc input[type="text"] {
   flex: 1;
   min-width: 0;
@@ -816,4 +831,76 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
   border-left-color: var(--aviso-forte);
   background: var(--aviso-fundo);
   color: var(--aviso);
+}
+
+/* ---------------------------------------------------------------------------
+   Painel de personalizar
+   ---------------------------------------------------------------------------
+   Duas colunas e a legenda em faixa larga embaixo. Antes era uma coluna so de
+   480px: nove ajustes empilhados, scroll numa tela de ajustes, e cada linha com
+   um alinhamento proprio (uns rotulos em cima do controle, outros ao lado do
+   checkbox). Aqui todo rotulo fica em cima do controle, sem excecao -- e o que
+   tira a sensacao de bagunca, mais do que a largura. */
+.painel.config .opcao { padding: 0; border-top: none; }
+.painel.config .opcao + .opcao { margin-top: 16px; }
+.painel.config .bloco + .bloco { margin-top: 18px; }
+
+/* A legenda ocupa a largura inteira, fora da grade: cinco campos de texto numa
+   coluna so empurrariam tudo pra baixo e trariam o scroll de volta. */
+.painel.config .bloco.larga { margin-top: 18px; }
+.painel.config .legenda-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px 22px;
+}
+
+/* Checkbox com o texto A DIREITA, e a caixa como primeiro elemento de cada
+   linha. Antes o rotulo ficava a esquerda e a caixa era jogada na outra ponta
+   por space-between: com textos de tamanhos diferentes, nada se alinhava com
+   nada. Aqui as tres caixas formam uma coluna reta. */
+.painel.config .caixas { display: flex; flex-direction: column; gap: 9px; }
+.painel.config .cx {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  cursor: pointer;
+  margin: 0;
+}
+.painel.config .cx input[type="checkbox"] { margin: 0; flex: none; }
+.painel.config .cx span { min-width: 0; }
+.painel.config .cx.desativada { opacity: .45; cursor: default; }
+.painel.config .cx.desativada input { cursor: default; }
+
+/* O rodape numa linha so: a explicacao a esquerda, o botao a direita. O botao
+   ocupava a largura inteira e virava a coisa mais chamativa da tela, quando e o
+   que menos se usa. */
+.rodape-config {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--linha);
+}
+.rodape-config .dica { margin: 0; flex: 1 1 260px; }
+
+/* O segmentado de Formato tem cinco botoes e media 344px numa coluna de 344px:
+   encaixava no fio, e "Círculo" ficava cortado assim que a janela estreitava um
+   pouco. Aqui os botoes ficam um tico menores, so dentro deste painel, e sobra
+   folga.
+   
+   Nao deixei quebrar em duas linhas, que era a solucao obvia: o segmentado tem
+   uma pilula deslizante posicionada por medida, e com os botoes em linhas
+   diferentes ela se esticava por cima das duas. Nem usei rolagem horizontal --
+   numa tela de ajustes, a opcao escondida simplesmente nao e encontrada. */
+.painel.config .seg { font-size: 12px; padding: 6px 9px; }
+
+/* Telas estreitas: os cinco botoes de Formato passam a nao caber e "Círculo"
+   fica cortado na borda. Medido: o controle pede 333px, e abaixo de 380px de
+   painel a coluna ja e menor que isso. */
+@media (max-width: 430px) {
+  .painel.config .seg { font-size: 11.5px; padding: 6px 7px; }
 }
