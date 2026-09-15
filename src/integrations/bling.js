@@ -164,20 +164,49 @@ async function blingFetch(caminho, params = {}, tentativa = 1) {
 }
 
 /**
- * Lista pedidos de venda em um intervalo de datas.
+ * O relogio do Bling e o de SAO PAULO, nao o UTC.
+ *
+ * Isto nao e preciosismo: o container do Railway roda em UTC, e uma janela
+ * montada com `toISOString()` cai TRES HORAS no futuro para o Bling. O filtro
+ * aceita a data, responde 200 e devolve lista vazia -- ou seja, a leitura
+ * incremental pareceria estar funcionando enquanto nunca traria pedido nenhum.
+ *
+ * Medido: a janela 08:40-09:40 devolveu os pedidos 1515 e 1517; a mesma janela
+ * escrita em UTC (11:40-12:40) devolveu zero.
+ */
+export function momentoNoBling(quando = new Date()) {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).formatToParts(quando);
+  const p = Object.fromEntries(partes.map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+/**
+ * Lista pedidos de venda.
+ *
+ * Por INTERVALO DE CRIACAO (`dataDe`/`dataAte`), que e a varredura de sempre;
+ * ou por DATA DE ALTERACAO (`alteradosDesde`), que e o que permite perguntar "o
+ * que mudou desde a ultima vez" e receber de volta dois ou tres pedidos em vez
+ * de setecentos. Confirmado que o filtro e mesmo aplicado: uma janela de 2019
+ * devolve zero, enquanto um parametro inventado nao filtra nada -- entao o zero
+ * e resposta, e nao parametro ignorado.
+ *
  * A API pagina de 100 em 100; seguimos ate a pagina vir vazia.
  */
-export async function listarPedidos({ dataDe, dataAte, maxPaginas = 50 } = {}) {
+export async function listarPedidos({ dataDe, dataAte, alteradosDesde, maxPaginas = 50 } = {}) {
   const paraISO = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
   const todos = [];
 
+  const filtro = alteradosDesde
+    ? { dataAlteracaoInicial: alteradosDesde }
+    : { dataInicial: paraISO(dataDe), dataFinal: paraISO(dataAte) };
+
   for (let pagina = 1; pagina <= maxPaginas; pagina++) {
-    const dados = await blingFetch("/pedidos/vendas", {
-      pagina,
-      limite: 100,
-      dataInicial: paraISO(dataDe),
-      dataFinal: paraISO(dataAte),
-    });
+    const dados = await blingFetch("/pedidos/vendas", { pagina, limite: 100, ...filtro });
     const lote = dados?.data || [];
     todos.push(...lote);
     if (lote.length < 100) break; // ultima pagina
@@ -296,6 +325,11 @@ export function extrairDoPedido(pedido) {
 // 3. A NATUREZA DE OPERACAO (o que diz se e bonificacao) e campo de NOTA, nao
 //    de pedido.
 
+// ATENCAO: /nfe NAO aceita filtro por data de alteracao -- so por emissao.
+// Testado: uma janela de alteracao impossivel (2019) devolve a lista inteira,
+// ou seja, o parametro e ignorado em silencio. Por isso a leitura incremental
+// pede as notas por EMISSAO recente, que de todo modo e o evento que interessa:
+// nota emitida e o marco em que a remessa vai pro WMS.
 export async function listarNotas({ dataDe, dataAte, maxPaginas = 50 } = {}) {
   const paraISO = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
   const todas = [];
