@@ -10,8 +10,9 @@
 //     &statusPedido=TODOS
 //
 // Isso significa que NAO precisamos de navegador pra ler os dados: basta um
-// GET com o cookie de sessao. O Playwright entra so no login (uma vez a cada
-// poucos dias), porque ali tem reCAPTCHA -- ver src/fonteslog-login.js.
+// GET com o cookie de sessao -- e e por isso que o SERVIDOR consegue ler o WMS
+// sozinho, sem ninguem na frente do computador (ver lib/wms.js). O Playwright
+// entra so no login, porque ali tem reCAPTCHA -- ver src/fonteslog-login.js.
 //
 // SOBRE A PAGINACAO: a tabela usa DataTables no lado do CLIENTE. O "Mostrar 10
 // registros" e o "Anterior/Proximo" sao enfeite do JavaScript -- o HTML ja vem

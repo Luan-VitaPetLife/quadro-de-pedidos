@@ -71,8 +71,8 @@ src/
   scheduler.js           ciclo a cada SYNC_INTERVAL_MINUTES (padrão 2h)
   sync.js                reconsulta a Mandaê nos pedidos conhecidos (reforço)
   sync-bling.js          lê o Bling, mescla duplicados, preenche cadastro
-  sync-fonteslog.js      lê o portal do WMS e manda pro quadro (RODA LOCAL)
-  fonteslog-login.js     login manual no WMS, salva a sessão (RODA LOCAL)
+  sync-fonteslog.js      lê o WMS na sua máquina (conferência; o servidor já lê sozinho)
+  fonteslog-login.js     login manual no WMS e entrega a sessão ao quadro (RODA LOCAL)
   check-mandae.js        diagnóstico da conexão com a Mandaê
   testar-pedido.js       testa a integração inteira com um pedido real
   integrations/          clientes: mandae.js, fonteslog.js, bling.js
@@ -81,6 +81,8 @@ src/
     statusMapping.js     regras de cor + envelhecimento
     diasUteis.js         calendário de feriados nacionais
     db.js                SQLite, merge de pedidos e mesclagem de duplicados
+    wms.js               leitura do WMS, pulso da sessão e o estado que o quadro mostra
+    pastaDeDados.js      onde ficam banco e sessão (Volume no Railway)
 public/                  o quadro (HTML/CSS/JS puro)
 ```
 
@@ -92,45 +94,65 @@ npm run dev               idem, recarregando ao salvar
 npm run check-mandae      confere token da Mandaê e a ponte (partnerItemId)
 npm run check-mandae -- CODIGO          eventos reais de um rastreio
 npm run testar-pedido -- CODIGO [NUM]   testa a corrente inteira com um pedido real
-npm run fonteslog-login   abre o navegador pro login manual no WMS
-npm run sync-fonteslog    lê o WMS e manda pro quadro (--seco não grava)
+npm run fonteslog-login   login manual no WMS e entrega a sessão ao quadro
+npm run sync-fonteslog    lê o WMS daqui (conferência; --seco não grava)
 ```
 
 ## O que roda onde, e por quê
 
 **No Railway**, sozinho: o servidor, os webhooks da Mandaê, a reconsulta de
-reforço e a sincronização do Bling.
+reforço, a sincronização do Bling **e a leitura do WMS da FontesLog**.
 
-**Na sua máquina**, com você por perto: a leitura do WMS da FontesLog.
+**Você**, de qualquer máquina: o login no portal da FontesLog — e só quando o
+quadro pedir.
 
-O motivo é o **reCAPTCHA** no login do portal da FontesLog
-(`/Login/ExibirCaptcha` responde `{"MostrarRecaptcha":true}`). Robô nenhum
-passa por ali — e não é para passar, essa é a função dele. O caminho legítimo
-é você logar uma vez (`npm run fonteslog-login`) e a automação reaproveitar a
-sessão salva, como o navegador faz com "continuar conectado".
+O motivo de sobrar essa única tarefa humana é o **reCAPTCHA** no login do portal
+(`/Login/ExibirCaptcha` responde `{"MostrarRecaptcha":true}`). Robô nenhum passa
+por ali — e não é para passar, essa é a função dele. O caminho legítimo é você
+logar uma vez e a automação reaproveitar a sessão, como o navegador faz com
+"continuar conectado". `npm run fonteslog-login` abre o navegador, você resolve
+o captcha, e o script **entrega a sessão ao quadro** (`POST /api/fonteslog/sessao`).
+Daí em diante quem lê o portal é o servidor.
 
 Depois de logado, a leitura em si **não precisa de navegador**: as telas do
-portal são GET com tudo na query string, então basta um `fetch` com o cookie.
+portal são GET com tudo na query string, então basta um `fetch` com o cookie. É
+isso que permite o servidor ler sozinho.
+
+### O pulso, e por que ele existe
+
+O cookie `ASP.NET_SessionId` **não tem data de validade**: quem o mata é o
+servidor da DDS, por **inatividade** — a janela padrão do ASP.NET é de ~20
+minutos, e ela reinicia a cada requisição. No relógio do ciclo (2 horas) a
+sessão morreria sozinha entre uma rodada e outra, e o login manual viraria
+rotina diária. Por isso o quadro bate numa tela barata a cada
+`WMS_PULSO_MINUTOS` (padrão 10) só para manter a janela aberta.
+
+O que ainda derruba, e contra o que não há jeito: o portal reiniciar (a sessão
+vive na memória do servidor deles) ou a DDS expirar por tempo absoluto. Aí é
+login manual mesmo — e o quadro avisa numa faixa acima do placar, porque dado
+velho **sem aviso** é pior do que dado nenhum: os quadrados continuariam com o
+último status conhecido e um pedido travado no armazém ontem seguiria verde hoje.
 
 > **Paginação:** a tabela do portal usa DataTables no lado do cliente. O
 > "Mostrar 10 registros" e o "Anterior/Próximo" são enfeite do JavaScript — o
 > HTML já vem com todas as linhas. Confirmado: a tela exibia 10 e o HTML
 > trazia 66. Não existe página 2 para buscar.
 
-O cookie do portal expira; quando expirar, os scripts avisam e é só rodar o
-login de novo.
-
 ## Configuração
 
 Copie `.env.example` para `.env` e preencha. As mesmas chaves vão nas
-*Variables* do Railway — **menos** as da FontesLog, que só existem localmente.
+*Variables* do Railway — **menos** `FONTESLOG_LOGIN` e `FONTESLOG_SENHA`, que
+só servem para preencher o formulário do login manual, na sua máquina. A sessão
+resultante é que vai para o servidor, pela rota de entrega.
 
 | Variável | Para quê |
 |---|---|
 | `MANDAE_TOKEN` / `MANDAE_CUSTOMER_ID` | API da Mandaê (Configurações → API) |
 | `MANDAE_WEBHOOK_SECRET` | autentica os webhooks **e** as rotas administrativas |
 | `BLING_CLIENT_ID` / `BLING_CLIENT_SECRET` | app criado na Área do integrador do Bling |
-| `FONTESLOG_URL` / `_LOGIN` / `_SENHA` | portal do WMS (**só local**) |
+| `FONTESLOG_URL` | portal do WMS (o servidor também precisa: é ele quem lê) |
+| `FONTESLOG_LOGIN` / `_SENHA` | preenchem o formulário do login manual (**só local**) |
+| `WMS_PULSO_MINUTOS` | padrão 10. De quanto em quanto tempo a sessão do WMS é mantida viva |
 | `SYNC_INTERVAL_MINUTES` | padrão 120. Acima de 60, use múltiplos de 60 |
 | `DIAS_UTEIS_AVISO` / `_PROBLEMA` | envelhecimento (padrão 5 e 10) |
 | `BOARD_URL` | quadro alvo dos scripts locais |

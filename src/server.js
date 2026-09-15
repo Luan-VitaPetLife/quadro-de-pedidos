@@ -213,7 +213,8 @@ app.post("/api/sync", async (req, res) => {
 app.post("/webhooks/mandae/item-processado", handleItemProcessado);
 app.post("/webhooks/mandae/rastreamento", handleRastreamento);
 
-// Recebe o que o script local leu do WMS da FontesLog (ver src/sync-fonteslog.js).
+// Entrada alternativa do WMS: recebe o que alguem leu na propria maquina.
+// O caminho normal e o servidor ler sozinho -- ver src/lib/wms.js.
 app.post("/webhooks/fonteslog", handleFontesLog);
 
 // OAuth do Bling. O /bling/callback e o "Link de redirecionamento" cadastrado
