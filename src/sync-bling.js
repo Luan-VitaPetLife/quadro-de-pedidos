@@ -234,6 +234,12 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
   const paraMesclarPorNota = [];
 
   const situacoes = await situacoesDeVenda();
+  // Quem esta rodada mexeu. A via rapida usa isso pra reconsultar a Mandae SO
+  // nesses pedidos -- reconsultar o quadro inteiro de 3 em 3 minutos seriam
+  // milhares de chamadas por hora pra reperguntar sobre pedidos que ninguem
+  // tocou.
+  const tocados = new Set();
+
   const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, notasSemValor: 0, apelidos: 0, porSituacao: {} };
 
   let n = 0;
@@ -368,6 +374,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
       // quando a transportadora ligar.
       r.apelidos += registrarApelidos(canonico, apelidos);
       if (nota?.numero) paraMesclarPorNota.push([canonico, chaveNota(nota.numero)]);
+      tocados.add(canonico);
       r.gravados++;
     } catch (err) {
       r.erros++;
@@ -430,6 +437,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
     }, { permitirCriacao: true });
     r.apelidos += registrarApelidos(nota.numero, [nota.rastreio].filter(Boolean));
     paraMesclarPorNota.push([nota.numero, chaveNota(nota.numero)]);
+    tocados.add(nota.numero);
   }
 
   // ---------------------------------------------------------------------
@@ -468,6 +476,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
       `${r.bonificacoes} bonificacao(oes), ${r.ignorados} ignorado(s), ${r.removidos} removido(s), ${r.erros} erro(s).`
   );
   r.incremental = incremental;
+  r.tocados = [...tocados];
   return r;
 }
 

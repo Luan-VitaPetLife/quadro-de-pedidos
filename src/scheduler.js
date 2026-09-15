@@ -157,14 +157,20 @@ export function startScheduler() {
       // Pela mesma trava da varredura: as duas escrevem nos mesmos quadrados e
       // dividiriam o orcamento de chamadas da API entre si. Quando a varredura
       // esta rodando, pular e o certo -- ela ja ve tudo que a via rapida veria.
-      const { rodou } = await comTravaDeSincronizacao(() => runSyncBling({ alteradosDesde: desde }));
+      const { rodou, resultado } = await comTravaDeSincronizacao(() => runSyncBling({ alteradosDesde: desde }));
       if (!rodou) return;
 
       // Pedido novo traz rastreio novo, e rastreio novo ainda nao tem historia
       // no quadro. Sem isto ele apareceria sem status da transportadora ate a
       // varredura seguinte -- justamente o atraso que a via rapida veio cortar.
+      //
+      // SO nos pedidos que esta rodada mexeu. Reconciliar o quadro inteiro aqui
+      // seriam centenas de chamadas a Mandae a cada poucos minutos, quase todas
+      // perguntando de novo sobre pedidos que ninguem tocou.
+      const tocados = resultado?.tocados || [];
+      if (!tocados.length) return;
       const { runSync } = await import("./sync.js");
-      await runSync().catch((err) => console.error("[via-rapida] Mandae:", err.message));
+      await runSync({ apenas: tocados }).catch((err) => console.error("[via-rapida] Mandae:", err.message));
     } catch (err) {
       if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) return;
       console.error("[via-rapida] erro:", err.message);
