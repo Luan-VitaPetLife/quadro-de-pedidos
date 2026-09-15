@@ -203,6 +203,18 @@ function marcarSegmento(idContainer, atributo, valor) {
 // ---------------------------------------------------------------------------
 function fmtData(iso) {
   if (!iso) return null;
+
+  // Data SEM hora sai daqui pelo caminho de cima, e isso nao e detalhe.
+  //
+  // `new Date("2026-09-14")` nao e lido como 14 de setembro aqui: a norma manda
+  // tratar uma data pura como MEIA-NOITE EM UTC, e Brasilia esta tres horas
+  // atras -- o resultado exibido virava "13/09/26, 21:00". Errava o dia E
+  // inventava uma hora que o dado nunca teve. Era assim que o pedido feito no
+  // dia 14 aparecia como feito no dia 13.
+  //
+  // Formatando o texto direto, sem passar por Date, nao ha fuso para atrapalhar.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso).trim())) return fmtDia(iso);
+
   try {
     return new Date(iso).toLocaleString("pt-BR", {
       day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit",
@@ -221,8 +233,6 @@ function fmtDia(iso) {
   return d.split("-").reverse().join("/");
 }
 
-// A data que manda é a do PEDIDO, não a do último evento: "pedidos de hoje"
-// quer dizer feitos hoje.
 // A data que o filtro de período usa.
 //
 // A emissão da NOTA vem primeiro, e não a data do pedido. O motivo é o critério
