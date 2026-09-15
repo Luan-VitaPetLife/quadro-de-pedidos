@@ -901,7 +901,13 @@ document.addEventListener("keydown", (e) => {
 function mostrarAvisoDoWms(wms) {
   const caixa = document.getElementById("avisoWms");
   if (!caixa) return;
-  if (!wms || wms.estado === "ok") {
+
+  // Só os estados que são de fato um problema. Qualquer outra coisa -- "ok",
+  // um estado novo que o servidor passe a mandar, meta ainda não escrita --
+  // esconde a faixa. Uma tarja vermelha por um estado que ninguém previu
+  // alarma sem informar, e alarme que não diz nada ensina a ignorar alarme.
+  const PROBLEMAS = ["expirada", "ausente", "indisponivel"];
+  if (!wms || !PROBLEMAS.includes(wms.estado)) {
     caixa.hidden = true;
     return;
   }

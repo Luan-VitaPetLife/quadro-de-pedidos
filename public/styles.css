@@ -803,6 +803,13 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
   font-size: 13px;
   line-height: 1.45;
 }
+/* PRECISA estar aqui: o `display: flex` acima e regra de autor e vence o
+   `[hidden] { display: none }` da folha do proprio navegador, que e regra de
+   agente. Sem esta linha a faixa fica visivel mesmo escondida por hidden -- e
+   como nesse estado ela nao tem texto, o que aparece e uma tarja vermelha vazia
+   em cima do quadro, alarmando sem dizer nada. */
+.avisoWms[hidden] { display: none; }
+
 .avisoWms strong { font-weight: 650; }
 .avisoWms.ameno {
   border-color: var(--aviso-linha);
