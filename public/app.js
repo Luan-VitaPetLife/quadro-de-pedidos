@@ -129,7 +129,9 @@ function aplicarPrefs() {
     const cx = document.getElementById("opt" + chave[0].toUpperCase() + chave.slice(1));
     const ehPrincipal = prefs.principal === chave;
     cx.disabled = ehPrincipal;
-    cx.closest(".opcao").classList.toggle("desativada", ehPrincipal);
+    // A propria linha, e nao o grupo: as tres caixas dividem um `.opcao` so,
+    // entao apagar o grupo apagaria as tres por causa de uma.
+    cx.closest(".cx").classList.toggle("desativada", ehPrincipal);
   }
 
   for (const [chave, id] of Object.entries(IDS_DA_LEGENDA)) {
