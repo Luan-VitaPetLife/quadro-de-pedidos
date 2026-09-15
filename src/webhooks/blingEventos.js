@@ -27,9 +27,18 @@ import crypto from "node:crypto";
 import { comTravaDeSincronizacao } from "../lib/travaDeSincronizacao.js";
 import { setMeta } from "../lib/db.js";
 
-// Eventos que mexem no quadro. Produto e estoque tambem podem ser assinados no
-// painel do Bling, e nao interessam aqui -- o quadro e de remessas.
-const NOS_INTERESSA = /^(order|invoice)\./;
+// Eventos que NAO mexem no quadro. Produto e estoque podem ser assinados no
+// painel do Bling e nao interessam aqui -- o quadro e de remessas.
+//
+// A lista e de recusa, e nao de aceite, de proposito. Se o nome do evento vier
+// num campo que este codigo nao conhece (versao nova do payload, formato
+// diferente), uma lista de aceite nao casaria com nada e o quadro responderia
+// 200 sem NUNCA agir -- a pior falha possivel aqui, porque por fora parece que
+// esta tudo configurado. Com a lista de recusa, o desconhecido dispara a
+// leitura. O custo de disparar a toa e uma leitura incremental barata, ja
+// protegida por debounce e trava; o custo de nao disparar e o recurso inteiro
+// nao funcionar em silencio.
+const NAO_INTERESSA = /^(product|stock|virtualStock|supplierProduct)\./i;
 
 /**
  * Confere a assinatura HMAC-SHA256 que o Bling manda em X-Bling-Signature-256.
@@ -138,7 +147,10 @@ export async function handleEventoBling(req, res) {
     return res.status(401).json({ error: "assinatura invalida" });
   }
 
-  const evento = String(req.body?.event || "");
+  // O nome do evento ja apareceu como `event` na documentacao; os outros campos
+  // ficam como plano B para o caso de uma versao do payload usar outro nome.
+  const corpo = req.body || {};
+  const evento = String(corpo.event || corpo.evento || corpo.type || "");
 
   // Responde JA. O Bling desiste em 5 segundos e reentrega o evento depois; se
   // a resposta esperasse a sincronizacao terminar, todo evento viraria uma
@@ -146,8 +158,11 @@ export async function handleEventoBling(req, res) {
   res.status(200).json({ ok: true, evento });
 
   setMeta("blingWebhookUltimoEm", new Date().toISOString());
-  setMeta("blingWebhookUltimoEvento", evento);
+  // Quando o nome do evento nao for reconhecido, guarda os CAMPOS que vieram.
+  // Sem isso, diagnosticar um payload em formato inesperado exigiria o log do
+  // container, que nao esta ao alcance de quem opera.
+  setMeta("blingWebhookUltimoEvento", evento || `(sem nome; campos: ${Object.keys(corpo).join(", ")})`);
 
-  if (!NOS_INTERESSA.test(evento)) return;
+  if (evento && NAO_INTERESSA.test(evento)) return;
   agendar();
 }
