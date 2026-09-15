@@ -28,6 +28,19 @@ export function cronExpressionForMinutes(minutes) {
   return `0 */${hours} * * *`;
 }
 
+/**
+ * Um intervalo em minutos vindo do ambiente, preso a uma faixa segura.
+ *
+ * Existe porque um valor invalido numa variavel de ambiente nao pode virar uma
+ * expressao cron quebrada: isso derrubaria a subida do servidor inteiro por
+ * causa de um numero mal digitado.
+ */
+function intervaloValido(bruto, padrao, minimo, maximo) {
+  const n = Number(bruto);
+  if (!Number.isFinite(n) || n < minimo) return padrao;
+  return Math.min(maximo, Math.floor(n));
+}
+
 export function startScheduler() {
   const minutes = Number(process.env.SYNC_INTERVAL_MINUTES || 120);
   const cronExpr = cronExpressionForMinutes(minutes);
@@ -112,6 +125,58 @@ export function startScheduler() {
     ciclo();
   });
 
+  // ---------------------------------------------------------------------
+  // A via rapida do Bling
+  // ---------------------------------------------------------------------
+  //
+  // A varredura de 2 horas existe porque ela e CARA: uma chamada de detalhe por
+  // pedido, com centenas de pedidos na janela de 60 dias. Perguntar tudo de novo
+  // de 3 em 3 minutos estouraria o limite de requisicoes da API e nao deixaria o
+  // quadro mais fresco -- deixaria mais lento.
+  //
+  // Mas da pra fazer uma pergunta muito menor: "o que mudou desde a ultima
+  // vez?". Medido no Bling de verdade: 4 pedidos alterados no dia inteiro, 0 na
+  // ultima hora. Entao a via rapida quase nunca gasta mais que a propria
+  // listagem, e um pedido que muda aparece no quadro em minutos, nao em horas.
+  //
+  // A JANELA OLHA MAIS PRA TRAS QUE O INTERVALO, de proposito: uma rodada pulada
+  // (trava ocupada pela varredura, deploy, reinicio) abriria um buraco por onde
+  // um pedido passaria sem ser visto, e ele so reapareceria horas depois. Reler
+  // um punhado de pedidos e barato; perder um e o problema que o quadro existe
+  // pra evitar.
+  const minutosDaViaRapida = intervaloValido(process.env.BLING_VIA_RAPIDA_MINUTOS, 3, 1, 30);
+  const margemDaJanela = minutosDaViaRapida * 3 + 5;
+
+  async function viaRapida() {
+    try {
+      const { momentoNoBling } = await import("./integrations/bling.js");
+      const { runSyncBling } = await import("./sync-bling.js");
+      const { comTravaDeSincronizacao } = await import("./lib/travaDeSincronizacao.js");
+
+      const desde = momentoNoBling(new Date(Date.now() - margemDaJanela * 60000));
+      // Pela mesma trava da varredura: as duas escrevem nos mesmos quadrados e
+      // dividiriam o orcamento de chamadas da API entre si. Quando a varredura
+      // esta rodando, pular e o certo -- ela ja ve tudo que a via rapida veria.
+      const { rodou } = await comTravaDeSincronizacao(() => runSyncBling({ alteradosDesde: desde }));
+      if (!rodou) return;
+
+      // Pedido novo traz rastreio novo, e rastreio novo ainda nao tem historia
+      // no quadro. Sem isto ele apareceria sem status da transportadora ate a
+      // varredura seguinte -- justamente o atraso que a via rapida veio cortar.
+      const { runSync } = await import("./sync.js");
+      await runSync().catch((err) => console.error("[via-rapida] Mandae:", err.message));
+    } catch (err) {
+      if (String(err.message).startsWith("BLING_NAO_AUTORIZADO")) return;
+      console.error("[via-rapida] erro:", err.message);
+    }
+  }
+
+  const rapida = cron.schedule(`*/${minutosDaViaRapida} * * * *`, viaRapida);
+  console.log(
+    `[scheduler] via rapida do Bling a cada ${minutosDaViaRapida} minuto(s), ` +
+      `olhando ${margemDaJanela} minuto(s) pra tras.`
+  );
+
   // O pulso da sessao da FontesLog, num relogio proprio e muito mais rapido que
   // o ciclo.
   //
@@ -124,8 +189,7 @@ export function startScheduler() {
   // Preso entre 1 e 30 de proposito: acima de 30 nao adianta nada (a sessao ja
   // teria morrido na janela de ~20 minutos), e um valor invalido no ambiente nao
   // pode virar uma expressao cron quebrada que derruba a subida do servidor.
-  const pedido = Number(process.env.WMS_PULSO_MINUTOS);
-  const minutosDoPulso = Number.isFinite(pedido) && pedido >= 1 ? Math.min(30, Math.floor(pedido)) : 10;
+  const minutosDoPulso = intervaloValido(process.env.WMS_PULSO_MINUTOS, 10, 1, 30);
   const pulso = cron.schedule(`*/${minutosDoPulso} * * * *`, () => {
     pulsarSessaoWms().catch((err) => console.error("[wms] erro no pulso:", err.message));
   });
@@ -133,5 +197,5 @@ export function startScheduler() {
 
   // Devolvidos pra que o encerramento gracioso consiga parar os timers -- sem
   // isso o cron segura o processo vivo e o desligamento estoura o prazo.
-  return { stop: () => { tarefa.stop(); pulso.stop(); } };
+  return { stop: () => { tarefa.stop(); rapida.stop(); pulso.stop(); } };
 }

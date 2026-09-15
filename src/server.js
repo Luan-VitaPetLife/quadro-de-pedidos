@@ -7,6 +7,7 @@ import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
 import { handleFontesLog } from "./webhooks/fonteslog.js";
+import { handleEventoBling } from "./webhooks/blingEventos.js";
 import { handleInvestigar } from "./webhooks/investigar.js";
 import { handlePenteFino } from "./webhooks/penteFino.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
@@ -15,7 +16,20 @@ import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handl
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-app.use(express.json());
+// O corpo CRU fica guardado junto do parseado.
+//
+// O webhook do Bling assina o corpo com HMAC-SHA256, e assinatura se confere
+// sobre os bytes exatos que chegaram -- reserializar o objeto com
+// JSON.stringify daria outra string (ordem de chaves, espacos, escapes) e a
+// conferencia falharia em pedidos legitimos. Sem guardar aqui, o corpo cru nao
+// existe mais quando a rota roda.
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.corpoCru = buf;
+    },
+  })
+);
 
 // O quadro esta publico de proposito (decisao de operacao: sem senha, pra
 // qualquer pessoa do time abrir direto). Isso NAO significa que ele deva
@@ -217,6 +231,13 @@ app.post("/webhooks/mandae/rastreamento", handleRastreamento);
 // O caminho normal e o servidor ler sozinho -- ver src/lib/wms.js.
 app.post("/webhooks/fonteslog", handleFontesLog);
 
+// Configurar em: Bling -> Area do integrador -> seu app -> aba Webhooks.
+// URL: https://quadro.vitapetlife.com/webhooks/bling
+// Recursos: Pedido de venda e Nota fiscal, acoes "criado" e "alterado".
+// A autenticacao e por assinatura HMAC no header X-Bling-Signature-256, com o
+// client secret do app -- nao ha segredo a preencher no painel.
+app.post("/webhooks/bling", handleEventoBling);
+
 // OAuth do Bling. O /bling/callback e o "Link de redirecionamento" cadastrado
 // no app criado na Area do integrador do Bling.
 app.get("/bling/autorizar", handleAutorizar);
@@ -249,6 +270,18 @@ app.get("/api/diagnostico", (req, res) => {
     instanciaAnterior: d?.anterior ?? null,
     memoriaMB: Math.round(process.memoryUsage().rss / 1048576),
     node: process.version,
+    // Como esta chegando a noticia do Bling.
+    //
+    // Sem isto, "o webhook esta configurado e funcionando" e "o webhook nunca
+    // foi configurado" sao indistinguiveis por fora -- os dois mostram um quadro
+    // atualizado, porque a via rapida cobre os dois casos. A diferenca esta em
+    // SEGUNDOS contra MINUTOS, e so da pra saber olhando se algum evento chegou.
+    bling: {
+      ultimaLeitura: getMeta("lastBlingSyncAt") || null,
+      webhookUltimoEm: getMeta("blingWebhookUltimoEm") || null,
+      webhookUltimoEvento: getMeta("blingWebhookUltimoEvento") || null,
+      webhookUltimaRecusa: getMeta("blingWebhookUltimaRecusa") || null,
+    },
     // Qual commit esta realmente no ar.
     //
     // Sem isto eu disparei uma sincronizacao achando que a versao nova ja

@@ -177,11 +177,40 @@ function hojeISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export async function runSyncBling({ dias = 60 } = {}) {
+/**
+ * Le o Bling e atualiza o quadro.
+ *
+ * Dois modos, com a MESMA regra de negocio -- o que muda e so o que se pergunta
+ * ao Bling:
+ *
+ *   varredura (padrao)   os ultimos `dias` dias de pedidos. Cara: uma chamada
+ *                        de detalhe por pedido. E a rede de seguranca.
+ *   incremental          so o que MUDOU desde `alteradosDesde`. Tipicamente
+ *                        zero a tres pedidos, entao pode rodar de minutos em
+ *                        minutos e e isso que deixa o quadro quase ao vivo.
+ *
+ * Nao ha uma segunda implementacao das regras, de proposito: duas copias se
+ * separam com o tempo, e um pedido passaria a virar um quadrado diferente
+ * conforme tivesse chegado pela via rapida ou pela varredura.
+ *
+ * @param {{dias?: number, alteradosDesde?: string, diasDeNota?: number}} opcoes
+ */
+export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNota = null } = {}) {
+  const incremental = !!alteradosDesde;
   const hoje = new Date();
+  // As notas nao podem ser filtradas por alteracao (o /nfe ignora esse filtro),
+  // entao no modo incremental elas vem por EMISSAO recente -- poucos dias bastam,
+  // porque a nota que interessa a um pedido que acabou de mudar e uma nota que
+  // acabou de ser emitida.
+  const diasDeNotaEfetivo = diasDeNota ?? (incremental ? 3 : dias);
   const inicio = new Date(hoje.getTime() - dias * 86400000);
+  const inicioDaNota = new Date(hoje.getTime() - diasDeNotaEfetivo * 86400000);
 
-  console.log(`[bling] sincronizando os ultimos ${dias} dia(s)...`);
+  console.log(
+    incremental
+      ? `[bling] lendo o que mudou desde ${alteradosDesde} (notas dos ultimos ${diasDeNotaEfetivo} dia(s))...`
+      : `[bling] sincronizando os ultimos ${dias} dia(s)...`
+  );
 
   // Marca onde a rodada esta.
   //
@@ -192,10 +221,12 @@ export async function runSyncBling({ dias = 60 } = {}) {
   const marcar = (etapa) => setMeta("sincronizacaoEtapa", `${etapa} @ ${new Date().toISOString()}`);
 
   marcar("lendo notas");
-  const notas = await lerNotas({ dataDe: inicio, dataAte: hoje, marcar });
+  const notas = await lerNotas({ dataDe: inicioDaNota, dataAte: hoje, marcar });
 
   marcar(`${notas.size} notas lidas; listando pedidos`);
-  const lista = await listarPedidos({ dataDe: inicio, dataAte: hoje });
+  const lista = incremental
+    ? await listarPedidos({ alteradosDesde })
+    : await listarPedidos({ dataDe: inicio, dataAte: hoje });
   console.log(`[bling] ${lista.length} pedido(s) na listagem.`);
 
   // Pares (quadrado canonico -> chave da nota) para mesclar no fim, quando o
@@ -421,15 +452,22 @@ export async function runSyncBling({ dias = 60 } = {}) {
     if (candidatos.length) r.mesclados += mesclarEmCanonico(canonico, candidatos).mesclados;
   }
 
-  r.removidos = limparPedidosSemStatus();
+  // A limpeza varre o QUADRO INTEIRO, e nao so o que esta rodada leu -- entao
+  // ela pertence a varredura, nao a via rapida. Rodando de minutos em minutos
+  // ela nao acrescentaria nada (o que ela apaga nao depende da janela) e daria
+  // muitas chances a uma corrida: um quadrado recem-criado, no intervalo entre
+  // o upsert e a chegada da nota, e exatamente o perfil do que ela remove.
+  if (!incremental) r.removidos = limparPedidosSemStatus();
+
   setMeta("lastBlingSyncAt", new Date().toISOString());
-  setMeta("lastNotasSyncAt", new Date().toISOString());
+  if (!incremental) setMeta("lastNotasSyncAt", new Date().toISOString());
 
   console.log(
-    `[bling] concluido: ${r.gravados} pedido(s) gravado(s), ${r.comRastreio} com rastreio, ` +
+    `[bling] ${incremental ? "via rapida" : "varredura"} concluida: ${r.gravados} pedido(s) gravado(s), ${r.comRastreio} com rastreio, ` +
       `${r.mesclados} duplicado(s) mesclado(s), ${r.criados} novo(s), ${r.notasSoltas} nota(s) sem pedido, ` +
       `${r.bonificacoes} bonificacao(oes), ${r.ignorados} ignorado(s), ${r.removidos} removido(s), ${r.erros} erro(s).`
   );
+  r.incremental = incremental;
   return r;
 }
 
