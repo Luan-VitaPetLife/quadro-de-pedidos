@@ -904,3 +904,149 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
 @media (max-width: 430px) {
   .painel.config .seg { font-size: 11.5px; padding: 6px 7px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Entrar na FontesLog
+   ---------------------------------------------------------------------------
+   Três passos, um aberto por vez. Não é enfeite: quem abre esta tela abre uma
+   vez por mês, e os três passos juntos na tela pareciam uma lista de exigências.
+   Um de cada vez, a tela tem sempre uma coisa só pra fazer.
+
+   O passo já cumprido continua clicável -- quem fechou o portal sem copiar o
+   cookie precisa voltar ao passo 2, não recomeçar do PIN. */
+.avisoWms .entrarWms {
+  margin-left: auto;
+  align-self: center;
+  border-color: var(--erro-linha);
+  color: var(--erro);
+  background: transparent;
+}
+.avisoWms .entrarWms:hover { border-color: var(--erro-forte); background: var(--painel); }
+.avisoWms .entrarWms[hidden] { display: none; }
+
+.painel.entrar { max-width: 470px; }
+
+.passos { list-style: none; margin: 4px 0 0; padding: 0; counter-reset: none; }
+.passo { border-top: 1px solid var(--linha); }
+.passo:first-child { border-top: none; }
+
+.passo h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 13px 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tinta-fraca);
+  cursor: pointer;
+}
+.passo[data-aberto="true"] h3 { color: var(--tinta); cursor: default; }
+
+.nPasso {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  background: var(--trilha);
+  color: var(--tinta-fraca);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.passo[data-aberto="true"] .nPasso { background: var(--tinta); color: var(--fundo); }
+
+/* O corpo some por altura, e não por display:none, pra abrir sem pular. */
+.passo .corpo { display: none; padding: 0 0 16px 30px; }
+.passo[data-aberto="true"] .corpo { display: block; }
+.passo .corpo .dica { margin-top: 0; }
+.passo .corpo .btn.primario { margin-top: 14px; }
+
+.linha-campo { display: flex; gap: 8px; }
+.linha-campo input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--linha-forte);
+  background: var(--fundo);
+  color: var(--tinta);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: .18em;
+}
+.linha-campo .btn { margin-top: 0; }
+
+/* Rótulo, valor e ações numa linha só: o valor é o que a pessoa veio buscar,
+   então ele fica no meio, ocupando o espaço que sobra. */
+.credencial {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 7px;
+  border: 1px solid var(--linha);
+  border-radius: 9px;
+  background: var(--painel-2);
+}
+.credencial label {
+  flex: 0 0 44px;
+  font-size: 11.5px;
+  color: var(--tinta-fraca);
+}
+.credencial code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--tinta);
+}
+.btn.menor { padding: 5px 10px; font-size: 11.5px; }
+
+.painel.entrar textarea {
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--linha-forte);
+  background: var(--fundo);
+  color: var(--tinta);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.recado {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--erro-linha);
+  background: var(--erro-fundo);
+  color: var(--erro);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.recado.ok { border-color: var(--ok-linha); background: var(--ok-fundo); color: var(--ok); }
+.recado.neutro { border-color: var(--linha); background: var(--painel-2); color: var(--tinta-fraca); }
+.recado[hidden] { display: none; }
+
+/* A gaveta do plano B. Fechada por padrão: no dia a dia o botão de reconectar
+   resolve, e mostrar o plano B ao lado do plano A faz o plano A parecer
+   duvidoso. Ela abre sozinha no único momento em que é a resposta certa. */
+.plano-b { margin-top: 16px; border-top: 1px solid var(--linha); padding-top: 10px; }
+.plano-b > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--tinta-fraca);
+  list-style: none;
+}
+.plano-b > summary::-webkit-details-marker { display: none; }
+.plano-b > summary::before { content: "▸ "; }
+.plano-b[open] > summary::before { content: "▾ "; }
+.plano-b > summary:hover { color: var(--tinta); }
+.plano-b .dica { margin: 10px 0 8px; }
+.plano-b .btn { margin-top: 6px; }

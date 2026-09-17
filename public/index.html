@@ -41,6 +41,10 @@
     <div class="avisoWms" id="avisoWms" hidden>
       <strong id="avisoWmsTitulo"></strong>
       <span id="avisoWmsTexto"></span>
+      <!-- O botao so aparece quando entrar RESOLVE o problema. Com o portal
+           fora do ar ele fica escondido: mandar alguem logar quando a falha e
+           do outro lado e desperdicar o unico gesto que a pessoa tem. -->
+      <button class="btn entrarWms" id="avisoWmsEntrar" type="button" hidden>Entrar na FontesLog</button>
     </div>
 
     <!-- Placar: uma faixa, não quatro cartões. O total é contexto; o que
@@ -234,6 +238,86 @@
         <button class="btn" id="ocultarCancelar" type="button">Cancelar</button>
         <button class="btn primario" id="ocultarConfirmar" type="button">Marcar resolvido</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Entrar na FontesLog.
+       Três passos numerados, um visível por vez, porque a pessoa que abre isto
+       abre uma vez por mês e não decora nada: o PIN, o login no portal, e a
+       sessão de volta. O captcha é o único passo que não dá para tirar do
+       caminho -- ver webhooks/wmsLogin.js para a medição que provou isso. -->
+  <div class="cortina" id="entrarBackdrop">
+    <div class="painel entrar" role="dialog" aria-labelledby="entrarTitulo">
+      <div class="ph">
+        <h2 id="entrarTitulo">Entrar na FontesLog</h2>
+        <button class="fechar" id="entrarFechar" aria-label="Fechar">&times;</button>
+      </div>
+
+      <ol class="passos">
+        <li class="passo" id="passoPin" data-aberto="true">
+          <h3><span class="nPasso">1</span>Destrave esta tela</h3>
+          <div class="corpo">
+            <p class="dica">
+              O quadro é aberto para o time todo; a senha do portal não pode ser.
+              O PIN fica no servidor, e vale enquanto esta aba estiver aberta.
+            </p>
+            <div class="linha-campo">
+              <input type="password" id="entrarPin" inputmode="numeric" autocomplete="off" placeholder="PIN">
+              <button class="btn primario" id="entrarPinOk" type="button">Continuar</button>
+            </div>
+          </div>
+        </li>
+
+        <li class="passo" id="passoReligar">
+          <h3><span class="nPasso">2</span>Reconecte</h3>
+          <div class="corpo">
+            <p class="dica">
+              O quadro refaz o login sozinho, com as credenciais que já estão no servidor.
+              Leva alguns segundos.
+            </p>
+            <button class="btn primario" id="entrarReligar" type="button">Reconectar agora</button>
+
+            <!-- Só abre quando o selo do captcha vence, e aí a pessoa precisa
+                 mesmo ir ao portal. Fica fechado porque este é o caso raro: no
+                 dia a dia o botão acima resolve, e uma tela que mostra o plano B
+                 junto com o plano A faz o plano A parecer duvidoso. -->
+            <details class="plano-b" id="planoB">
+              <summary>Não deu certo?</summary>
+              <p class="dica">
+                Quer dizer que faz mais de 5 dias que ninguém resolve um captcha no portal.
+                Entre lá uma vez — marque <strong>Cliente</strong> e use estes dados:
+              </p>
+              <div class="credencial">
+                <label>CNPJ</label>
+                <code id="credLogin">—</code>
+                <button class="btn menor" data-copiar="credLogin" type="button">Copiar</button>
+              </div>
+              <div class="credencial">
+                <label>Senha</label>
+                <code id="credSenha" data-oculta="true">••••••••</code>
+                <button class="btn menor" id="credVer" type="button">Ver</button>
+                <button class="btn menor" data-copiar="credSenha" type="button">Copiar</button>
+              </div>
+              <button class="btn" id="entrarAbrirPortal" type="button">Abrir o portal em outra aba</button>
+              <p class="dica">
+                Feito o login lá, o quadro precisa da sessão que o portal acabou de te dar —
+                ela nasce no seu navegador, não no servidor. Pressione <kbd>F12</kbd>, abra
+                <strong>Application</strong> → <strong>Cookies</strong> →
+                <span class="mono">portalfonteslog…</span>, copie o valor de
+                <span class="mono">ASP.NET_SessionId</span> e cole aqui:
+              </p>
+              <textarea id="entrarCookie" rows="2" placeholder="Cole aqui o ASP.NET_SessionId"></textarea>
+              <button class="btn primario" id="entrarEnviar" type="button">Enviar a sessão</button>
+              <p class="dica menor">
+                Sem apetite para o F12? <span class="mono">npm run fonteslog-login</span> faz
+                o mesmo pelo terminal, de qualquer máquina.
+              </p>
+            </details>
+          </div>
+        </li>
+      </ol>
+
+      <p class="recado" id="entrarRecado" hidden></p>
     </div>
   </div>
 

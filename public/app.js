@@ -904,6 +904,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (document.body.classList.contains("tv")) return sairTv();
   fecharConfig();
+  fecharEntrar();
   fecharPainel();
 });
 
@@ -952,17 +953,238 @@ function mostrarAvisoDoWms(wms) {
     caixa.className = "avisoWms";
     titulo.textContent = "O quadro ainda não tem acesso ao armazém.";
     texto.textContent =
-      "Falta o primeiro login na FontesLog. Rode `npm run fonteslog-login`, resolva o captcha," +
-      " e daí em diante o quadro lê o WMS sozinho.";
+      "Falta o primeiro login na FontesLog. Leva um minuto, e daí em diante o quadro lê o WMS sozinho.";
   } else {
     caixa.className = "avisoWms";
     titulo.textContent = "O quadro parou de receber o armazém.";
     const ultima = wms.ultimaLeituraEm ? ` A última leitura foi ${fmtData(wms.ultimaLeituraEm)}.` : "";
+    // Chegar aqui significa que o religamento automático JÁ tentou e não passou
+    // -- senão o estado nem seria "expirada". Dizer só "a sessão caiu" faria a
+    // pessoa tentar o que o servidor já tentou sozinho.
     texto.textContent =
-      `A sessão da FontesLog caiu${desde} e o portal exige um captcha pra renovar.${ultima}` +
-      " Rode `npm run fonteslog-login`, resolva o captcha, e o quadro volta a ler sozinho.";
+      `A sessão da FontesLog caiu${desde} e o quadro não conseguiu reconectar sozinho:` +
+      ` faz mais de 5 dias que ninguém resolve um captcha no portal.${ultima}` +
+      " Entre uma vez e ele volta a se virar sozinho.";
   }
+
+  // O botão só nos estados em que entrar RESOLVE. Com o portal fora do ar, quem
+  // clicasse gastaria o gesto à toa -- e aprenderia a desconfiar do botão.
+  document.getElementById("avisoWmsEntrar").hidden = wms.estado === "indisponivel";
   caixa.hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// Entrar na FontesLog, pelo quadro
+// ---------------------------------------------------------------------------
+//
+// O captcha do portal só renderiza no domínio do próprio portal (medido: sob
+// outro domínio ele responde "domínio inválido para a chave do site"), e o
+// cookie da sessão é httpOnly. Ou seja: a parte humana não tem como sumir.
+//
+// O que esta tela faz é encolher tudo em volta dela. Antes, renovar a sessão
+// pedia o repositório clonado, o Playwright instalado e um terminal na máquina
+// certa. Agora pede três passos numa tela que abre do próprio aviso vermelho --
+// de qualquer computador do time.
+
+const entrarState = { pin: null, portalUrl: null };
+
+function recadoEntrar(texto, tipo = "erro") {
+  const el = document.getElementById("entrarRecado");
+  el.textContent = texto || "";
+  el.className = `recado ${tipo}`;
+  el.hidden = !texto;
+}
+
+function mostrarPasso(id) {
+  for (const li of document.querySelectorAll("#entrarBackdrop .passo")) {
+    li.dataset.aberto = String(li.id === id);
+  }
+}
+
+function abrirEntrar() {
+  document.getElementById("entrarBackdrop").classList.add("open");
+  recadoEntrar("");
+  document.getElementById("entrarCookie").value = "";
+
+  // O PIN já validado nesta aba pula o passo 1. Fica em sessionStorage, e não
+  // em localStorage, de propósito: numa TV do armazém que ninguém desliga, um
+  // PIN gravado para sempre viraria a senha do portal ao alcance de qualquer um.
+  const guardado = sessionStorage.getItem("wmsPin");
+  if (guardado) {
+    document.getElementById("entrarPin").value = guardado;
+    validarPin();
+  } else {
+    mostrarPasso("passoPin");
+    document.getElementById("entrarPin").focus();
+  }
+}
+
+function fecharEntrar() {
+  document.getElementById("entrarBackdrop").classList.remove("open");
+}
+
+async function validarPin() {
+  const pin = document.getElementById("entrarPin").value.trim();
+  if (!pin) return recadoEntrar("Digite o PIN.");
+
+  const botao = document.getElementById("entrarPinOk");
+  botao.disabled = true;
+  try {
+    const res = await fetch("/api/fonteslog/entrar/credenciais", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const corpo = await res.json();
+    if (!res.ok) {
+      sessionStorage.removeItem("wmsPin");
+      mostrarPasso("passoPin");
+      return recadoEntrar(corpo.error || "Não consegui destravar.");
+    }
+
+    entrarState.pin = pin;
+    entrarState.portalUrl = corpo.url;
+    sessionStorage.setItem("wmsPin", pin);
+    document.getElementById("planoB").open = false;
+
+    document.getElementById("credLogin").textContent = corpo.login;
+    const senha = document.getElementById("credSenha");
+    senha.dataset.valor = corpo.senha;
+    senha.dataset.oculta = "true";
+    senha.textContent = "••••••••";
+    document.getElementById("credVer").textContent = "Ver";
+
+    recadoEntrar("");
+    mostrarPasso("passoReligar");
+  } catch {
+    recadoEntrar("Sem conexão com o servidor.");
+  } finally {
+    botao.disabled = false;
+  }
+}
+
+/**
+ * O caminho normal: um clique, e o servidor refaz o login sozinho.
+ *
+ * Só chega no plano B quando o selo do captcha venceu -- e aí a tela abre a
+ * gaveta sozinha, porque nesse momento ela deixou de ser um detalhe escondido
+ * e passou a ser a única coisa que resta fazer.
+ */
+async function religar() {
+  const botao = document.getElementById("entrarReligar");
+  botao.disabled = true;
+  recadoEntrar("Refazendo o login no portal…", "neutro");
+  try {
+    const res = await fetch("/api/fonteslog/entrar/religar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: entrarState.pin }),
+    });
+    const corpo = await res.json();
+
+    if (res.status === 409) {
+      document.getElementById("planoB").open = true;
+      return recadoEntrar(
+        "Faz mais de 5 dias que ninguém resolve um captcha no portal, e sem isso o quadro não consegue entrar sozinho. Siga os passos que abriram abaixo."
+      );
+    }
+    if (!res.ok) {
+      const extra = corpo.detalhe ? ` (${corpo.detalhe})` : "";
+      return recadoEntrar(`${corpo.error || "Não deu certo."}${extra}`);
+    }
+
+    const ate = corpo.seloValeAte ? ` O quadro consegue se reconectar sozinho até ${fmtData(corpo.seloValeAte)}.` : "";
+    recadoEntrar(`Pronto. O quadro já está lendo o armazém de novo.${ate}`, "ok");
+    poll();
+    setTimeout(fecharEntrar, 3500);
+  } catch {
+    recadoEntrar("Sem conexão com o servidor.");
+  } finally {
+    botao.disabled = false;
+  }
+}
+
+async function enviarSessaoColada() {
+  const texto = document.getElementById("entrarCookie").value.trim();
+  if (!texto) return recadoEntrar("Cole o cookie primeiro.");
+
+  const botao = document.getElementById("entrarEnviar");
+  botao.disabled = true;
+  recadoEntrar("Conferindo no portal…", "neutro");
+  try {
+    const res = await fetch("/api/fonteslog/entrar/sessao", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: entrarState.pin, texto }),
+    });
+    const corpo = await res.json();
+    if (!res.ok) {
+      const extra = corpo.detalhe ? ` (${corpo.detalhe})` : "";
+      return recadoEntrar(`${corpo.error || "Não deu certo."}${extra}`);
+    }
+    recadoEntrar("Pronto. O quadro já está lendo o armazém de novo.", "ok");
+    poll();
+    setTimeout(fecharEntrar, 2500);
+  } catch {
+    recadoEntrar("Sem conexão com o servidor.");
+  } finally {
+    botao.disabled = false;
+  }
+}
+
+/** Copia sem depender da API nova: em http:// o navegador não dá clipboard. */
+async function copiar(texto, botao) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch {
+    const campo = document.createElement("textarea");
+    campo.value = texto;
+    campo.style.position = "fixed";
+    campo.style.opacity = "0";
+    document.body.appendChild(campo);
+    campo.select();
+    document.execCommand("copy");
+    campo.remove();
+  }
+  const antes = botao.textContent;
+  botao.textContent = "Copiado";
+  setTimeout(() => { botao.textContent = antes; }, 1400);
+}
+
+document.getElementById("avisoWmsEntrar").addEventListener("click", abrirEntrar);
+document.getElementById("entrarFechar").addEventListener("click", fecharEntrar);
+document.getElementById("entrarBackdrop").addEventListener("click", (e) => {
+  if (e.target.id === "entrarBackdrop") fecharEntrar();
+});
+document.getElementById("entrarPinOk").addEventListener("click", validarPin);
+document.getElementById("entrarPin").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") validarPin();
+});
+document.getElementById("entrarReligar").addEventListener("click", religar);
+document.getElementById("entrarEnviar").addEventListener("click", enviarSessaoColada);
+document.getElementById("entrarAbrirPortal").addEventListener("click", () => {
+  window.open(entrarState.portalUrl, "_blank", "noopener");
+});
+document.getElementById("credVer").addEventListener("click", (e) => {
+  const campo = document.getElementById("credSenha");
+  const oculta = campo.dataset.oculta === "true";
+  campo.dataset.oculta = String(!oculta);
+  campo.textContent = oculta ? campo.dataset.valor : "••••••••";
+  e.target.textContent = oculta ? "Ocultar" : "Ver";
+});
+for (const botao of document.querySelectorAll("#entrarBackdrop [data-copiar]")) {
+  botao.addEventListener("click", () => {
+    const campo = document.getElementById(botao.dataset.copiar);
+    copiar(campo.dataset.valor || campo.textContent, botao);
+  });
+}
+// Clicar no passo já cumprido volta para ele: a pessoa que fechou o portal sem
+// copiar o cookie precisa reabrir, e não recomeçar do PIN.
+for (const cabecalho of document.querySelectorAll("#entrarBackdrop .passo h3")) {
+  cabecalho.addEventListener("click", () => {
+    const passo = cabecalho.closest(".passo");
+    if (passo.id === "passoPin" || entrarState.pin) mostrarPasso(passo.id);
+  });
 }
 
 async function poll() {
