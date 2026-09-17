@@ -12,9 +12,15 @@ import { handleInvestigar } from "./webhooks/investigar.js";
 import { handlePenteFino } from "./webhooks/penteFino.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
 import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar, handleSonda } from "./webhooks/bling.js";
+import { aplicarSessao, lerWmsAgora, handleCredenciais, handleSessaoColada, handleReligar } from "./webhooks/wmsLogin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+// O Railway poe um proxy na frente. Sem isto, `req.ip` e sempre o IP do proxy --
+// e a trava de PIN errado da tela de entrar na FontesLog, que conta por IP,
+// trancaria o time inteiro no primeiro engano de uma pessoa so.
+app.set("trust proxy", 1);
 
 // O corpo CRU fica guardado junto do parseado.
 //
@@ -156,45 +162,19 @@ app.post("/api/fonteslog/sessao", express.json({ limit: "1mb" }), async (req, re
   const esperado = process.env.MANDAE_WEBHOOK_SECRET;
   if (esperado && req.query?.s !== esperado) return res.status(401).json({ error: "segredo invalido" });
 
-  const { CAMINHO_SESSAO, salvarSessao, conferirSessao } = await import("./integrations/fonteslog.js");
-  const fs = await import("node:fs");
-
-  // Guarda a que esta valendo ANTES de escrever por cima.
-  //
-  // Um login que deu errado nao pode derrubar um login que deu certo: se a
-  // sessao nova nao passar no teste, a antiga volta e o quadro continua lendo.
-  // Sem isso, um envio ruim deixaria o WMS parado ate alguem reparar.
-  const anterior = fs.existsSync(CAMINHO_SESSAO) ? fs.readFileSync(CAMINHO_SESSAO) : null;
-
-  try {
-    salvarSessao(req.body);
-  } catch (err) {
-    if (err.message === "SESSAO_SEM_COOKIE_DO_PORTAL") {
-      return res.status(400).json({ error: "essa sessao nao tem cookie do portal FontesLog" });
-    }
-    throw err;
-  }
-
-  const teste = await conferirSessao();
-  if (!teste.viva) {
-    if (anterior) fs.writeFileSync(CAMINHO_SESSAO, anterior);
-    else fs.rmSync(CAMINHO_SESSAO, { force: true });
-    return res.status(400).json({
-      error: "a sessao enviada nao abre o portal",
-      detalhe: teste.motivo,
-      anteriorRestaurada: !!anterior,
-    });
-  }
+  const resultado = await aplicarSessao(req.body);
+  if (!resultado.ok) return res.status(400).json(resultado);
 
   res.json({ ok: true, valendo: true, lendoAgora: true });
-
-  // Le na hora, sem esperar o proximo ciclo: quem acabou de logar esta olhando
-  // o quadro pra ver se funcionou.
-  const { sincronizarWms } = await import("./lib/wms.js");
-  sincronizarWms({ dias: Number(process.env.BLING_DIAS || 60) }).catch((err) =>
-    console.error("[wms] leitura pos-login falhou:", err.message)
-  );
+  lerWmsAgora();
 });
+
+// Entrar na FontesLog pelo proprio quadro, sem terminal -- ver webhooks/wmsLogin.js
+// pra por que o captcha obriga a pessoa a passar pelo dominio do portal, e por
+// que estas duas rotas pedem PIN num quadro que de resto e aberto.
+app.post("/api/fonteslog/entrar/religar", handleReligar);
+app.post("/api/fonteslog/entrar/credenciais", handleCredenciais);
+app.post("/api/fonteslog/entrar/sessao", handleSessaoColada);
 
 app.get("/api/meta", async (req, res) => {
   const { estadoDoWms } = await import("./lib/wms.js");
