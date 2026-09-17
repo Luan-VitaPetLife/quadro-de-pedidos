@@ -104,16 +104,28 @@ npm run sync-fonteslog    lê o WMS daqui (conferência; --seco não grava)
 **No Railway**, sozinho: o servidor, os webhooks da Mandaê, a reconsulta de
 reforço, a sincronização do Bling **e a leitura do WMS da FontesLog**.
 
-**Você**, de qualquer máquina: o login no portal da FontesLog — e só quando o
-quadro pedir.
+**Você**: resolver um captcha no portal da FontesLog, no máximo a cada ~5 dias —
+e só quando o quadro pedir, pelo botão **Entrar na FontesLog** no aviso vermelho.
 
-O motivo de sobrar essa única tarefa humana é o **reCAPTCHA** no login do portal
-(`/Login/ExibirCaptcha` responde `{"MostrarRecaptcha":true}`). Robô nenhum passa
-por ali — e não é para passar, essa é a função dele. O caminho legítimo é você
-logar uma vez e a automação reaproveitar a sessão, como o navegador faz com
-"continuar conectado". `npm run fonteslog-login` abre o navegador, você resolve
-o captcha, e o script **entrega a sessão ao quadro** (`POST /api/fonteslog/sessao`).
-Daí em diante quem lê o portal é o servidor.
+São três camadas, da mais barata para a mais cara:
+
+1. O **pulso** de 10 minutos segura a sessão viva. Quase sempre é só isso.
+2. Se a sessão cair assim mesmo (deploy, portal reiniciado), o quadro **refaz o
+   login sozinho** — um POST em `/Login/AcessarCliente` com as credenciais do
+   servidor. Funciona enquanto valer o cookie `recaptcha_verificado`, que o
+   portal grava quando alguém resolve um captcha e que dura ~5 dias.
+3. Vencido esse prazo, aí sim uma pessoa resolve um captcha. Só aí.
+
+O passo 2 **não é captcha burlado**: é a mesma sessão humana sendo reaproveitada
+enquanto vale, como já se faz com o `ASP.NET_SessionId`. O login não renova o
+`recaptcha_verificado` (medido: a resposta não traz `Set-Cookie`), então o
+sistema continua ancorado num humano de verdade.
+
+> **Cuidado com um erro que já custou meses aqui.** Até setembro de 2026 este
+> README e os comentários do código afirmavam que refazer o login por HTTP era
+> impossível. O teste que provava isso rodava com a **senha truncada**: o dotenv
+> corta a linha no `#`, e a senha termina em `#`. O portal respondia o que
+> responde a qualquer senha errada, e aquilo virou lei. Use aspas no `.env`.
 
 Depois de logado, a leitura em si **não precisa de navegador**: as telas do
 portal são GET com tudo na query string, então basta um `fetch` com o cookie. É
