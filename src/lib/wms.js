@@ -14,7 +14,7 @@ import {
   ultimoMovimento,
 } from "../integrations/fonteslog.js";
 import { mapFontesLogStatus } from "./statusMapping.js";
-import { sessaoGravadaEm, temSessao } from "../integrations/fonteslog.js";
+import { sessaoGravadaEm, temSessao, religarSessao, seloValeAte } from "../integrations/fonteslog.js";
 import { getMeta, setMeta, upsertOrder } from "./db.js";
 
 /**
@@ -149,15 +149,17 @@ export function gravarPedidosWms(pedidos = []) {
 // O ciclo automatico, e o estado que o quadro mostra quando ele para
 // ---------------------------------------------------------------------------
 //
-// A parte que nao da pra automatizar e o LOGIN: o portal exige reCAPTCHA, que
-// existe exatamente pra impedir robo de entrar. Ja foi tentado por HTTP e nao
-// passa -- o registro da tentativa esta no fim de integrations/fonteslog.js.
+// Sao tres camadas, da mais barata pra mais cara:
 //
-// Entao o desenho aceita o limite em vez de fingir que ele nao existe: o
-// servidor le sozinho enquanto a sessao vive, mantem essa sessao viva o maximo
-// que consegue, e quando ela morre DIZ EM VOZ ALTA, em vez de mostrar dados
-// velhos como se fossem de agora. Dado velho sem aviso e pior do que dado
-// nenhum: o quadro continua verde e ninguem vai olhar.
+//   1. O pulso de 10 minutos segura a sessao viva. Na maior parte do tempo, e
+//      so isso que acontece.
+//   2. Se a sessao morrer assim mesmo (deploy, portal reiniciado), o quadro
+//      refaz o login SOZINHO -- enquanto o selo do captcha valer (~5 dias).
+//   3. Vencido o selo, ai sim uma pessoa resolve um captcha. So ai.
+//
+// E quando chega no 3, o quadro DIZ EM VOZ ALTA, em vez de mostrar dados velhos
+// como se fossem de agora. Dado velho sem aviso e pior do que dado nenhum: os
+// quadrados continuariam verdes e ninguem iria olhar.
 
 function anotarEstado(estado, detalhe = "") {
   if (getMeta("wmsSessaoEstado") !== estado) {
@@ -173,7 +175,7 @@ function anotarEstado(estado, detalhe = "") {
  * Nunca lanca: uma falha aqui nao pode derrubar o ciclo que ainda tem Bling e
  * Mandae pra sincronizar.
  */
-export async function sincronizarWms({ dias = 60 } = {}) {
+export async function sincronizarWms({ dias = 60, jaReligou = false } = {}) {
   if (!temSessao()) {
     anotarEstado("ausente", "nunca houve login neste servidor");
     return { ok: false, motivo: "ausente" };
@@ -195,9 +197,24 @@ export async function sincronizarWms({ dias = 60 } = {}) {
     return { ok: true, lidos, gravados, parados, rejeitados };
   } catch (err) {
     if (err.message === "SESSAO_EXPIRADA") {
-      anotarEstado("expirada", `expirou; o login foi feito em ${sessaoGravadaEm() || "?"}`);
-      console.warn("[wms] a sessao da FontesLog expirou -- precisa de `npm run fonteslog-login`.");
-      return { ok: false, motivo: "expirada" };
+      // Antes de pedir gente, tenta sozinho: enquanto o selo do captcha vale
+      // (~5 dias), refazer o login e so um POST. Ver religarSessao() para por
+      // que isso e reuso da sessao humana, e nao captcha burlado.
+      try {
+        // Uma tentativa por ciclo. Sem esta trava, uma sessao que morre logo
+        // depois de nascer poria os dois a se chamarem em looping.
+        if (jaReligou) throw new Error("PRECISA_DE_HUMANO");
+        await religarSessao();
+        console.log("[wms] a sessao tinha caido; religuei sozinho.");
+        return await sincronizarWms({ dias, jaReligou: true });
+      } catch (erroDoReligar) {
+        if (erroDoReligar.message !== "PRECISA_DE_HUMANO") {
+          console.warn("[wms] o religamento automatico falhou:", erroDoReligar.message);
+        }
+        anotarEstado("expirada", `expirou; o login foi feito em ${sessaoGravadaEm() || "?"}`);
+        console.warn("[wms] a sessao da FontesLog expirou e o selo do captcha nao vale mais -- precisa de gente.");
+        return { ok: false, motivo: "expirada" };
+      }
     }
     anotarEstado("indisponivel", err.message);
     console.error("[wms] falha ao ler o portal:", err.message);
@@ -239,6 +256,9 @@ export function estadoDoWms() {
     detalhe: getMeta("wmsSessaoDetalhe") || "",
     ultimaLeituraEm: getMeta("wmsUltimaLeituraEm") || null,
     loginFeitoEm: sessaoGravadaEm(),
+    // Ate quando o quadro ainda consegue religar sozinho. Null = a proxima
+    // queda vai precisar de gente, e o aviso muda de texto por causa disto.
+    seloValeAte: seloValeAte(),
     ultimoResultado: ultimo,
   };
 }

@@ -309,26 +309,123 @@ export async function buscarPedidosRejeitados({ dataDe, dataAte } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Por que NAO existe religamento automatico aqui
+// Religamento automatico
 // ---------------------------------------------------------------------------
 //
-// Tentativa feita e descartada, registrada pra ninguem repetir:
+// ATENCAO, porque aqui existiu um comentario dizendo o CONTRARIO do que esta
+// escrito agora, e ele parou o assunto por meses:
 //
-// O portal grava um cookie `recaptcha_verificado` com validade de ~5 dias, e
-// enquanto ele existe o /Login/ExibirCaptcha responde {"MostrarRecaptcha":false}.
-// Parecia significar que daria pra refazer o login por HTTP e manter a leitura
-// rodando sozinha por dias.
+// A versao anterior afirmava que refazer o login por HTTP era impossivel -- que
+// o portal exigia um token de captcha valido, e que um POST em
+// /Login/AcessarCliente com credenciais corretas respondia 302 para
+// "/?cnpjLogin=<cnpj>", ou seja, a volta pra tela de login.
 //
-// Nao da. Esse cookie so faz o portal NAO DESENHAR o widget; o servidor segue
-// exigindo um token de captcha valido pra autenticar. Um POST em
-// /Login/AcessarCliente com CNPJ e senha corretos responde 302 para
-// "/?cnpjLogin=<cnpj>" -- que PARECE sucesso, mas e a volta pra tela de login
-// com o campo preenchido. A prova esta em pedir uma tela protegida depois: ela
-// responde 302 para "/", ou seja, ninguem entrou.
+// O 302 era real. A causa, nao: o teste rodava com a SENHA ERRADA. O dotenv
+// trata "#" como inicio de comentario, e a senha termina em "#" -- entao
+// process.env.FONTESLOG_SENHA chegava truncada no ultimo caractere. O portal
+// respondia exatamente o que responde pra qualquer senha errada, e a leitura
+// disso virou uma lei da natureza. Com a senha inteira (aspas no .env), o mesmo
+// POST responde 302 para /HomeArmazem/Dashboard e a tela protegida seguinte
+// responde 200: entrou.
 //
-// (Cuidado ao testar: o corpo de um 302 e so "Object moved". Procurar o
-// formulario de login nele da falso negativo -- foi assim que a primeira
-// leitura errou e concluiu que tinha funcionado.)
+// A licao, mais util que o resultado: um teste negativo prova pouco quando uma
+// das entradas nao foi conferida.
 //
-// Entao sessao expirada exige mesmo login manual: `npm run fonteslog-login`.
-// E o certo -- o captcha existe pra impedir exatamente o que se tentou aqui.
+// O QUE AINDA PRECISA DE GENTE. O login so passa enquanto existe o cookie
+// `recaptcha_verificado`, que o portal grava quando ALGUEM resolve o captcha, e
+// que vale ~5 dias. O login NAO o renova (medido: a resposta do POST nao traz
+// Set-Cookie). Entao isto aqui nao e um captcha burlado -- e a mesma sessao
+// humana sendo reaproveitada enquanto ela vale, do mesmo jeito que ja fazemos
+// com o ASP.NET_SessionId. Passados os ~5 dias, uma pessoa resolve um captcha
+// de novo, e nao ha o que fazer quanto a isso.
+
+/** O cookie que diz "um humano resolveu um captcha aqui" -- se ainda valer. */
+function selorecaptcha() {
+  if (!temSessao()) return null;
+  const estado = JSON.parse(fs.readFileSync(CAMINHO_SESSAO, "utf-8"));
+  const selo = (estado.cookies || []).find((c) => c.name === "recaptcha_verificado");
+  if (!selo) return null;
+  // expires em segundos; -1 significa cookie de sessao (sem validade propria).
+  if (selo.expires > 0 && selo.expires * 1000 < Date.now()) return null;
+  return selo;
+}
+
+/**
+ * Refaz o login sozinho e grava a sessao nova.
+ *
+ * Lanca PRECISA_DE_HUMANO quando o selo do captcha nao existe mais -- e a
+ * fronteira honesta do que da pra automatizar aqui.
+ */
+export async function religarSessao() {
+  const login = process.env.FONTESLOG_LOGIN;
+  const senha = process.env.FONTESLOG_SENHA;
+  if (!login || !senha) throw new Error("FONTESLOG_LOGIN ou FONTESLOG_SENHA faltando");
+
+  const selo = selorecaptcha();
+  if (!selo) throw new Error("PRECISA_DE_HUMANO");
+
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36";
+  const seloHeader = `${selo.name}=${selo.value}`;
+
+  // 1. Sessao nova, ja levando o selo: sem ele o portal desenha o captcha.
+  const inicial = await fetch(`${BASE()}/`, { headers: { "User-Agent": UA, Cookie: seloHeader } });
+  const novo = (inicial.headers.getSetCookie?.() || [])
+    .map((c) => c.split(";")[0])
+    .find((c) => c.startsWith("ASP.NET_SessionId="));
+  if (!novo) throw new Error("o portal nao abriu uma sessao nova");
+
+  // 2. O login em si.
+  const resposta = await fetch(`${BASE()}/Login/AcessarCliente`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "User-Agent": UA,
+      Cookie: `${novo}; ${seloHeader}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: `${BASE()}/`,
+      Origin: BASE(),
+    },
+    body: new URLSearchParams({ tipoAcesso: "cliente", cpf: login, senha }),
+  });
+
+  // 3. Voltar pra "/" e a resposta de senha errada OU de selo vencido. Os dois
+  //    casos pedem gente, entao os dois viram o mesmo erro.
+  const destino = resposta.headers.get("location") || "";
+  if (/cnpjLogin=|^\/$/.test(destino)) throw new Error("PRECISA_DE_HUMANO");
+
+  const [nome, ...resto] = novo.split("=");
+  const cookies = [
+    { name: nome, value: resto.join("="), domain: dominio(), path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" },
+    { ...selo },
+  ];
+
+  // O selo e o unico bem insubstituivel que temos: ele custa uma pessoa. Se o
+  // passo seguinte reprovar a sessao nova, o arquivo antigo volta inteiro --
+  // senao um religamento que falhou levaria junto os dias de selo que sobravam.
+  const anterior = fs.existsSync(CAMINHO_SESSAO) ? fs.readFileSync(CAMINHO_SESSAO) : null;
+  salvarSessao({ cookies, origins: [] });
+
+  // 4. A prova. Um 302 aqui significa que o passo 3 mentiu -- ja aconteceu.
+  const teste = await conferirSessao();
+  if (!teste.viva) {
+    if (anterior) fs.writeFileSync(CAMINHO_SESSAO, anterior);
+    throw new Error("PRECISA_DE_HUMANO");
+  }
+
+  return { seloValeAte: selo.expires > 0 ? new Date(selo.expires * 1000).toISOString() : null };
+}
+
+function dominio() {
+  try {
+    return new URL(BASE()).hostname;
+  } catch {
+    return "portalfonteslog.ddsinformatica.com.br";
+  }
+}
+
+/** Ate quando o selo do captcha ainda permite religar sozinho. */
+export function seloValeAte() {
+  const selo = selorecaptcha();
+  if (!selo) return null;
+  return selo.expires > 0 ? new Date(selo.expires * 1000).toISOString() : null;
+}
