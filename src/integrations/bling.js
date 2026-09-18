@@ -197,11 +197,16 @@ export function momentoNoBling(quando = new Date()) {
  *
  * A API pagina de 100 em 100; seguimos ate a pagina vir vazia.
  */
-export async function listarPedidos({ dataDe, dataAte, alteradosDesde, maxPaginas = 50 } = {}) {
+export async function listarPedidos({ dataDe, dataAte, alteradosDesde, numero, maxPaginas = 50 } = {}) {
   const paraISO = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
   const todos = [];
 
-  const filtro = alteradosDesde
+  // Por NUMERO: e a releitura de um pedido so, pedida na mao pelo botao do
+  // painel. Confirmado contra a API -- `numero=1551` devolve exatamente um
+  // pedido, sem precisar de janela de data nenhuma.
+  const filtro = numero
+    ? { numero: String(numero) }
+    : alteradosDesde
     ? { dataAlteracaoInicial: alteradosDesde }
     : { dataInicial: paraISO(dataDe), dataFinal: paraISO(dataAte) };
 

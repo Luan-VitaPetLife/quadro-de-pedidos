@@ -80,9 +80,17 @@ function jaRepresentadaNoQuadro(numeroNota, indice) {
   return false;
 }
 
-async function lerNotas({ dataDe, dataAte, marcar = () => {}, apenasNovas = false }) {
+/**
+ * @param {{apenasEstas?: string[]}} opcoes `apenasEstas` troca a listagem por
+ *   uma lista fechada de ids. E a releitura de um pedido so: a nota dele e
+ *   conhecida pelo id (o pedido acabou de dizer qual e), entao nao ha janela de
+ *   data a varrer -- e, de quebra, nao importa se a listagem a esconderia por
+ *   estar cancelada. As regras a partir daqui sao as mesmas; muda so de onde
+ *   vem a lista.
+ */
+async function lerNotas({ dataDe, dataAte, marcar = () => {}, apenasNovas = false, apenasEstas = null }) {
   const naturezas = await naturezasDeOperacao();
-  const lista = await listarNotas({ dataDe, dataAte });
+  const lista = apenasEstas ? apenasEstas.map((id) => ({ id })) : await listarNotas({ dataDe, dataAte });
   marcar(`${lista.length} notas na listagem`);
   const porId = new Map();
   // Montado UMA vez: percorrer o quadro inteiro por nota transformaria a
@@ -193,6 +201,17 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {}, apenasNovas = fals
   return porId;
 }
 
+/**
+ * Teto de perguntas avulsas por nota numa rodada.
+ *
+ * Cinto de seguranca, nao orcamento: o esperado sao poucas por rodada, porque a
+ * guarda de "ja sabido" faz cada pedido ser perguntado uma vez so. O teto existe
+ * pro dia em que alguma mudanca do Bling faca a listagem parar de trazer meio
+ * mundo -- ai a rodada fica sem alguns rotulos em vez de virar uma tempestade de
+ * chamadas numa API que nao e nossa.
+ */
+const SONDAS_DE_NOTA_POR_RODADA = 80;
+
 /** "0000-00-00" e ausencia de data disfarcada de data; o Bling usa muito. */
 function dataValida(texto) {
   const d = String(texto || "").slice(0, 10);
@@ -220,9 +239,16 @@ function hojeISO() {
  * separam com o tempo, e um pedido passaria a virar um quadrado diferente
  * conforme tivesse chegado pela via rapida ou pela varredura.
  *
- * @param {{dias?: number, alteradosDesde?: string, diasDeNota?: number}} opcoes
+ *   releitura de um pedido  um pedido SO, pedido na mao pelo botao do painel.
+ *                           Quatro chamadas: acha o pedido pelo numero, le o
+ *                           detalhe, le a nota dele pelo id e o objeto de
+ *                           postagem. Nao varre nada e nao mexe em mais
+ *                           ninguem -- e a resposta pra "o Bling ja sabe, o
+ *                           quadro ainda nao" sem esperar as duas horas.
+ *
+ * @param {{dias?: number, alteradosDesde?: string, diasDeNota?: number, pedidoUnico?: string}} opcoes
  */
-export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNota = null } = {}) {
+export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNota = null, pedidoUnico = null } = {}) {
   const incremental = !!alteradosDesde;
   const hoje = new Date();
   // As notas nao podem ser filtradas por alteracao (o /nfe ignora esse filtro),
@@ -234,7 +260,9 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
   const inicioDaNota = new Date(hoje.getTime() - diasDeNotaEfetivo * 86400000);
 
   console.log(
-    incremental
+    pedidoUnico
+      ? `[bling] releitura do pedido ${pedidoUnico}...`
+      : incremental
       ? `[bling] lendo o que mudou desde ${alteradosDesde} (notas dos ultimos ${diasDeNotaEfetivo} dia(s))...`
       : `[bling] sincronizando os ultimos ${dias} dia(s)...`
   );
@@ -247,11 +275,31 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
   // porque o log do container nao esta ao meu alcance.
   const marcar = (etapa) => setMeta("sincronizacaoEtapa", `${etapa} @ ${new Date().toISOString()}`);
 
+  // A releitura de um pedido so comeca pelo fim: acha o pedido, le o detalhe e
+  // so entao sabe QUAL nota buscar. O detalhe e lido duas vezes (aqui e no laco
+  // adiante) de proposito -- uma chamada a mais e o preco de nao existir uma
+  // segunda copia das regras, que e o erro que este arquivo mais evita.
+  let listaUnica = null;
+  let idsDeNota = null;
+  if (pedidoUnico) {
+    listaUnica = await listarPedidos({ numero: pedidoUnico });
+    if (!listaUnica.length) {
+      console.warn(`[bling] releitura: o Bling nao conhece o pedido ${pedidoUnico}.`);
+      return { pedidoUnico, achou: false, pedidos: 0, gravados: 0 };
+    }
+    const detalheDoUnico = await detalhePedido(listaUnica[0].id);
+    idsDeNota = detalheDoUnico?.notaFiscal?.id ? [String(detalheDoUnico.notaFiscal.id)] : [];
+  }
+
   marcar("lendo notas");
-  const notas = await lerNotas({ dataDe: inicioDaNota, dataAte: hoje, marcar, apenasNovas: incremental });
+  const notas = pedidoUnico
+    ? await lerNotas({ marcar, apenasEstas: idsDeNota })
+    : await lerNotas({ dataDe: inicioDaNota, dataAte: hoje, marcar, apenasNovas: incremental });
 
   marcar(`${notas.size} notas lidas; listando pedidos`);
-  const lista = incremental
+  const lista = pedidoUnico
+    ? listaUnica
+    : incremental
     ? await listarPedidos({ alteradosDesde })
     : await listarPedidos({ dataDe: inicio, dataAte: hoje });
   console.log(`[bling] ${lista.length} pedido(s) na listagem.`);
@@ -267,7 +315,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
   // tocou.
   const tocados = new Set();
 
-  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, notasSemValor: 0, apelidos: 0, porSituacao: {} };
+  const r = { pedidos: lista.length, comRastreio: 0, mesclados: 0, gravados: 0, criados: 0, ignorados: 0, notasSoltas: 0, bonificacoes: 0, removidos: 0, erros: 0, puladas: 0, notasSemValor: 0, apelidos: 0, sondasDeNota: 0, porSituacao: {} };
 
   let n = 0;
   for (const resumido of lista) {
@@ -319,19 +367,64 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
 
       // A SITUACAO DA NOTA, que o quadro lia e jogava fora.
       //
-      // Ate aqui, nota cancelada virava so `temNota: false` -- e um pedido sem
-      // nota e um pedido que ainda nao faturou, que e verde. Guardar o rotulo e
-      // o que permite dizer a diferenca entre "ainda nao emitiu" e "emitiu e a
-      // nota caiu".
+      // Ate aqui, nota cancelada virava so `temNota: false` -- e pedido sem nota
+      // e pedido que ainda nao faturou, que e verde. Guardar o rotulo e o que
+      // permite dizer a diferenca entre "ainda nao emitiu" e "emitiu e a nota
+      // caiu".
       //
-      //   pedido sem nota nenhuma  null   -- apaga rotulo antigo
-      //   nota lida                o nome dela
-      //   nota pulada              undefined -- nao opina, o quadro ja tem
-      const situacaoNota = detalhe?.notaFiscal?.id
-        ? notaOpina
-          ? nomeDaSituacaoDaNota(notaBruta.situacao)
-          : undefined
-        : null;
+      //   pedido sem nota nenhuma   null      -- apaga rotulo antigo
+      //   nota lida na listagem     o nome dela
+      //   nota pulada               undefined -- nao opina, o quadro ja tem
+      //   nota que a listagem NAO trouxe       -- pergunta-se por ela; ver abaixo
+      //
+      // A LISTAGEM DE /nfe ESCONDE NOTA CANCELADA E REJEITADA.
+      //
+      // Medido: a janela 17-18/09 devolve 10 notas, todas situacao 5 ou 6. A
+      // 000323, cancelada, so aparece quando se pergunta por ela com
+      // `situacao=2`. Era por isso que o pedido 1551 da Ilma chegava aqui
+      // IDENTICO a um pedido que ainda nao faturou -- a nota simplesmente nao
+      // vinha, e nao ha como distinguir ausencia de ausencia.
+      //
+      // A correcao obvia -- pedir as escondidas junto com as outras na listagem
+      // -- foi medida e descartada: sao 44 notas em 60 dias, e traze-las ligaria
+      // a rotina que DESMONTA quadrado (apaga o rastreio como autoritativo,
+      // derruba o temNota) sobre quadrados que hoje estao certos. Barato de
+      // escrever, caro de errar.
+      //
+      // Entao a pergunta e feita UMA NOTA POR VEZ, e so no caso suspeito: o
+      // pedido aponta pra uma nota que a listagem nao trouxe. Esse pedido JA
+      // esta, hoje, sem nota e sem rastreio autoritativo -- o que se ganha aqui
+      // e a EXPLICACAO, nunca uma mudanca de estado. Nada alem do rotulo e
+      // tocado por esta leitura.
+      let situacaoNota;
+      if (!detalhe?.notaFiscal?.id) {
+        situacaoNota = null;
+      } else if (notaOpina) {
+        situacaoNota = nomeDaSituacaoDaNota(notaBruta.situacao);
+      } else if (!notaBruta) {
+        // Nota ja perguntada uma vez nao se pergunta de novo -- qualquer que
+        // tenha sido a resposta.
+        //
+        // A resposta so muda quando o pedido troca de nota, e nota nova e nota
+        // recente: ela vem pela listagem e sobrescreve este rotulo pelo caminho
+        // de cima. Sem esta guarda, os mesmos pedidos custariam uma chamada a
+        // cada duas horas, para sempre -- foram 12 deles no ensaio, todos
+        // respondendo "Autorizada" toda vez.
+        //
+        // Rotulo vazio nao conta como resposta: situacao que ainda nao sabemos
+        // traduzir vira null, e essa vale a pena reperguntar.
+        const jaSabido = !!getOrder(canonico)?.situacaoNota;
+        if (!jaSabido && r.sondasDeNota < SONDAS_DE_NOTA_POR_RODADA) {
+          try {
+            const avulsa = await detalheNota(detalhe.notaFiscal.id);
+            situacaoNota = nomeDaSituacaoDaNota(avulsa?.situacao);
+            r.sondasDeNota++;
+          } catch (err) {
+            // Falhar aqui custa o rotulo, nao a rodada.
+            console.warn(`[bling] nao consegui a situacao da nota do pedido ${canonico}: ${err.message}`);
+          }
+        }
+      }
 
       // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
       const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
@@ -533,17 +626,26 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
   // ela nao acrescentaria nada (o que ela apaga nao depende da janela) e daria
   // muitas chances a uma corrida: um quadrado recem-criado, no intervalo entre
   // o upsert e a chegada da nota, e exatamente o perfil do que ela remove.
-  if (!incremental) r.removidos = limparPedidosSemStatus();
+  if (!incremental && !pedidoUnico) r.removidos = limparPedidosSemStatus();
 
-  setMeta("lastBlingSyncAt", new Date().toISOString());
-  if (!incremental) setMeta("lastNotasSyncAt", new Date().toISOString());
+  // Releitura de um pedido NAO carimba a leitura do Bling.
+  //
+  // O carimbo responde "ate onde o quadro esta em dia", e quem decide se a
+  // subida precisa varrer tudo. Deixar um clique em um pedido avanca-lo seria
+  // dizer que o quadro inteiro foi conferido porque alguem olhou um cartao.
+  if (!pedidoUnico) {
+    setMeta("lastBlingSyncAt", new Date().toISOString());
+    if (!incremental) setMeta("lastNotasSyncAt", new Date().toISOString());
+  }
 
   console.log(
-    `[bling] ${incremental ? "via rapida" : "varredura"} concluida: ${r.gravados} pedido(s) gravado(s), ${r.comRastreio} com rastreio, ` +
+    `[bling] ${pedidoUnico ? `releitura do pedido ${pedidoUnico}` : incremental ? "via rapida" : "varredura"} concluida: ${r.gravados} pedido(s) gravado(s), ${r.comRastreio} com rastreio, ` +
       `${r.mesclados} duplicado(s) mesclado(s), ${r.criados} novo(s), ${r.notasSoltas} nota(s) sem pedido, ` +
       `${r.bonificacoes} bonificacao(oes), ${r.ignorados} ignorado(s), ${r.removidos} removido(s), ${r.erros} erro(s).`
   );
   r.incremental = incremental;
+  r.pedidoUnico = pedidoUnico;
+  if (pedidoUnico) r.achou = true;
   r.tocados = [...tocados];
   return r;
 }
