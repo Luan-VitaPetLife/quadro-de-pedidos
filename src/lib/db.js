@@ -879,13 +879,26 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
 
     for (const campo of [
       "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaEmitidaEm", "notaFiscal", "coletaPrevista",
-      "situacaoNota", "numeroLoja",
       "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
     ]) {
       const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
       const apelidoTem = linha[campo] !== undefined && linha[campo] !== null && linha[campo] !== "";
       if (!jaTem && apelidoTem) preencher[campo] = linha[campo];
     }
+
+    // SITUACAO DA NOTA E NUMERO DA VENDA NAO SE HERDAM. NUNCA.
+    //
+    // Eles sao fato sobre UM pedido do Bling, e so quem leu aquele pedido pode
+    // escreve-los. Eu os coloquei nesta lista e custou sete quadrados numa
+    // varredura so: a chave de nota descarta a serie, entao "000016" da serie
+    // 300 e "000016" de outra serie sao a mesma chave, a mesclagem absorveu o
+    // quadrado errado e o pedido 1535 (saudavel, da Ingrid) herdou o
+    // "Cancelada" de uma nota de outra pessoa -- e, com ele, saiu do quadro
+    // como se tivesse sido refeito.
+    //
+    // A mesclagem existe pra SOMAR o que cada quadrado sabe sobre a mesma
+    // remessa. Isto aqui nao e sobre a remessa: e sobre o documento de um
+    // pedido especifico, e herdar documento alheio e como herdar o CPF.
 
     // O evento mais recente entre os dois manda: o envelhecimento conta a
     // partir dele, e usar o mais antigo faria o pedido parecer parado.
