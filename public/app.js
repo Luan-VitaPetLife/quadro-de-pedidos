@@ -11,6 +11,13 @@ const state = {
   ocultos: 0,
   vendoOcultos: false,
   pin: localStorage.getItem("quadroPin") || "",
+  // O que a última releitura respondeu, e sobre qual pedido. Fica no estado,
+  // e não no nó da tela, porque o painel se repinta inteiro a cada poll — o
+  // recado escrito direto no DOM sumia junto.
+  recadoReler: null,
+  // O quadro atrás do painel ficou velho e a atualização foi adiada para não
+  // fechar o painel na cara de quem está lendo o recado.
+  quadroDesatualizado: false,
 };
 
 const palavraStatus = { green: "Seguindo bem", amber: "Precisa de atenção", red: "Com problema" };
@@ -419,7 +426,13 @@ async function chamar(rota, corpo) {
     localStorage.setItem("quadroPin", pin);
     return chamar(rota, corpo);
   }
-  if (!r.ok) throw new Error(`o quadro recusou (${r.status})`);
+  // A mensagem do servidor vale mais que o numero do erro: ele escreve coisas
+  // como "o Bling não conhece um pedido com o número 1551", e era isso que
+  // virava um "(404)" sem sentido na tela.
+  if (!r.ok) {
+    const corpo = await r.json().catch(() => null);
+    throw new Error(corpo?.error || `o quadro recusou (${r.status})`);
+  }
   return r.json();
 }
 
@@ -643,6 +656,9 @@ function aviso(texto, tom) {
 }
 
 function abrirPainel(numero) {
+  // Recado é sobre UM pedido: abrir outro cartão não herda a resposta do
+  // anterior.
+  if (state.recadoReler && state.recadoReler.numero !== numero) state.recadoReler = null;
   state.selectedId = numero;
   const o = state.orders.find((x) => x.orderNumber === numero);
   const cortina = document.getElementById("backdrop");
@@ -780,14 +796,103 @@ function abrirPainel(numero) {
   );
   painel.appendChild(grade);
 
+  // ── Reler no Bling ──────────────────────────────────────────────────
+  //
+  // O cartão conta o que o quadro leu da última vez. Quem acabou de mexer no
+  // pedido no Bling — cancelou a nota, refaturou, mudou a situação — não tem
+  // por que esperar o ciclo de duas horas para ver isso aqui.
+  //
+  // Lê SÓ este pedido: quatro chamadas ao Bling, nenhum efeito sobre os outros
+  // quadrados. É de propósito que a saída para "o quadro está errado neste
+  // cartão" seja estreita assim.
+  const rodape = document.createElement("div");
+  rodape.className = "rodape-painel";
+
+  const botaoReler = document.createElement("button");
+  botaoReler.className = "btn menor";
+  botaoReler.textContent = "Reler no Bling";
+  botaoReler.title = "Lê este pedido no Bling agora e atualiza o cartão";
+
+  const recado = document.createElement("span");
+  recado.className = "recado-reler";
+  if (state.recadoReler && state.recadoReler.numero === o.orderNumber) {
+    recado.textContent = state.recadoReler.texto;
+    if (state.recadoReler.tom) recado.classList.add(state.recadoReler.tom);
+  }
+
+  botaoReler.addEventListener("click", () => relerNoBling(o.orderNumber, botaoReler, recado));
+  rodape.append(botaoReler, recado);
+  painel.appendChild(rodape);
+
   cortina.classList.add("open");
   render();
 }
 
+/**
+ * Lê um pedido no Bling agora e repinta o cartão com o que voltou.
+ *
+ * Dois desfechos, e o segundo é o que exige cuidado:
+ *
+ *   continua no quadro   repinta o painel com o dado novo
+ *   saiu do quadro       cancelado no Bling, ou refeito em outro pedido. Aqui
+ *                        NÃO se atualiza o quadro na hora: o poll repinta o
+ *                        painel, não acha mais o cartão e fecha a cortina — o
+ *                        recado sumiria antes de alguém ler por que o pedido
+ *                        saiu. O quadro se atualiza quando o painel fechar.
+ */
+async function relerNoBling(numero, botao, recado) {
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = "Lendo…";
+  recado.textContent = "";
+  recado.className = "recado-reler";
+
+  try {
+    const r = await chamar("/api/pedido/reler", { orderNumber: numero });
+    if (!r) {
+      // PIN pedido e não respondido: nada aconteceu.
+      botao.disabled = false;
+      botao.textContent = rotulo;
+      return;
+    }
+
+    const pedido = r.pedido;
+    if (pedido && pedido.foraDoQuadro) {
+      state.recadoReler = {
+        numero,
+        tom: "neutro",
+        texto: pedido.substituidoPor
+          ? `Saiu do quadro: esta venda foi refeita no pedido ${pedido.substituidoPor}.`
+          : `Saiu do quadro: ${pedido.situacaoBling || "cancelado no Bling"}.`,
+      };
+      state.quadroDesatualizado = true;
+      recado.textContent = state.recadoReler.texto;
+      recado.classList.add("neutro");
+      botao.disabled = false;
+      botao.textContent = rotulo;
+      return;
+    }
+
+    state.recadoReler = { numero, texto: "Relido agora." };
+    await poll();
+  } catch (err) {
+    botao.disabled = false;
+    botao.textContent = rotulo;
+    recado.textContent = err.message;
+    recado.classList.add("ruim");
+  }
+}
+
 function fecharPainel() {
   state.selectedId = null;
+  state.recadoReler = null;
   document.getElementById("backdrop").classList.remove("open");
   render();
+  // A atualização adiada enquanto o recado estava na tela.
+  if (state.quadroDesatualizado) {
+    state.quadroDesatualizado = false;
+    poll();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,7 +1307,10 @@ async function poll() {
     const { lastSyncAt, wms } = await meta.json();
     render();
     mostrarAvisoDoWms(wms);
-    if (state.selectedId) abrirPainel(state.selectedId);
+    // Enquanto o painel segura um recado sobre um pedido que acabou de sair do
+    // quadro, ele NAO se repinta: repintar nao acharia mais o cartao, fecharia a
+    // cortina e levaria embora a explicacao antes de alguem ler.
+    if (state.selectedId && !state.quadroDesatualizado) abrirPainel(state.selectedId);
     linha.textContent = lastSyncAt ? `Sincronizado ${fmtData(lastSyncAt)}` : "Aguardando primeira sincronização";
   } catch {
     linha.textContent = "Sem conexão com o servidor";

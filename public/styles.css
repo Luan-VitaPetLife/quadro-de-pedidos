@@ -1007,6 +1007,20 @@ body[data-tamanho="tv"] .sq .ocultar { display: none; }
 }
 .btn.menor { padding: 5px 10px; font-size: 11.5px; }
 
+/* Rodape do painel: a releitura de um pedido so, e o que ela respondeu. */
+.rodape-painel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--linha);
+}
+.recado-reler { font-size: 12px; color: var(--tinta-fraca); }
+.recado-reler.ruim { color: var(--erro); }
+.recado-reler.neutro { color: var(--tinta-media); }
+
 .painel.entrar textarea {
   width: 100%;
   margin-top: 4px;

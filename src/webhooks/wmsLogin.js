@@ -221,6 +221,65 @@ export async function handleReligar(req, res) {
   }
 }
 
+/**
+ * POST /api/fonteslog/entrar/derrubar -- derruba a sessao de proposito.
+ *
+ * Existe pra TESTAR o aviso vermelho e o botao sem ter que esperar a sessao cair
+ * sozinha, o que pode levar dias.
+ *
+ * Duas decisoes que fazem esta rota ser segura:
+ *
+ * 1. So derruba o ASP.NET_SessionId. O selo do captcha fica -- e ele e o que
+ *    custa uma pessoa. Assim o proprio botao "Reconectar agora" desfaz o que
+ *    esta rota fez.
+ * 2. RECUSA quando o selo nao vale mais. Sem isso, um teste curioso poria o
+ *    quadro num estado que so sai com Playwright e terminal, que e justamente
+ *    o que o trabalho todo veio evitar.
+ *
+ * O estado e carimbado na mao porque a leitura seguinte religaria sozinha e o
+ * aviso sumiria antes de alguem ver. Isso tambem quer dizer que o aviso dura ate
+ * o proximo pulso (ver WMS_PULSO_MINUTOS): passado ele, o quadro se cura e a
+ * faixa some -- o que, afinal, e o comportamento correto.
+ */
+export async function handleDerrubar(req, res) {
+  const barrado = conferirPin(req);
+  if (barrado) return res.status(barrado.status).json(barrado.corpo);
+
+  const { seloValeAte } = await import("../integrations/fonteslog.js");
+  const { setMeta } = await import("../lib/db.js");
+
+  const selo = seloValeAte();
+  if (!selo) {
+    return res.status(409).json({
+      error: "Nao vou derrubar: o selo do captcha ja venceu.",
+      detalhe: "Sem ele, o botao do quadro nao conseguiria reconectar, e a volta exigiria terminal.",
+    });
+  }
+
+  if (!fs.existsSync(CAMINHO_SESSAO)) {
+    return res.status(409).json({ error: "Nao ha sessao pra derrubar." });
+  }
+
+  const estado = JSON.parse(fs.readFileSync(CAMINHO_SESSAO, "utf-8"));
+  const sessionId = (estado.cookies || []).find((c) => c.name === "ASP.NET_SessionId");
+  if (!sessionId) return res.status(409).json({ error: "A sessao salva nao tem ASP.NET_SessionId." });
+
+  sessionId.value = "derrubadaparateste00000x";
+  fs.writeFileSync(CAMINHO_SESSAO, JSON.stringify(estado, null, 2), "utf-8");
+
+  setMeta("wmsSessaoEstado", "expirada");
+  setMeta("wmsSessaoDesde", new Date().toISOString());
+  setMeta("wmsSessaoDetalhe", "derrubada de proposito pra testar o aviso");
+  console.warn("[wms] sessao derrubada de proposito (teste). O selo do captcha foi preservado.");
+
+  res.json({
+    ok: true,
+    avisoNoQuadro: "expirada",
+    seloValeAte: selo,
+    lembrete: "O proximo pulso religa sozinho e o aviso some. Teste agora.",
+  });
+}
+
 /** POST /api/fonteslog/entrar/sessao -- recebe o cookie colado e liga o WMS. */
 export async function handleSessaoColada(req, res) {
   const barrado = conferirPin(req);

@@ -2,7 +2,8 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listOrders, getMeta, dataDir, dataDirSource, db, ocultarPedido, reexibirPedido } from "./lib/db.js";
+import { listOrders, getMeta, getOrder, dataDir, dataDirSource, db, ocultarPedido, reexibirPedido } from "./lib/db.js";
+import { comTravaDeSincronizacao } from "./lib/travaDeSincronizacao.js";
 import { startScheduler } from "./scheduler.js";
 import { runSync } from "./sync.js";
 import { handleItemProcessado, handleRastreamento } from "./webhooks/mandae.js";
@@ -12,7 +13,7 @@ import { handleInvestigar } from "./webhooks/investigar.js";
 import { handlePenteFino } from "./webhooks/penteFino.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
 import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar, handleSonda } from "./webhooks/bling.js";
-import { aplicarSessao, lerWmsAgora, handleCredenciais, handleSessaoColada, handleReligar } from "./webhooks/wmsLogin.js";
+import { aplicarSessao, lerWmsAgora, handleCredenciais, handleSessaoColada, handleReligar, handleDerrubar } from "./webhooks/wmsLogin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -104,6 +105,48 @@ app.post("/api/reexibir", express.json(), (req, res) => {
   res.json({ ok: true, pedido: o });
 });
 
+// ---------------------------------------------------------------------------
+// Reler UM pedido no Bling
+// ---------------------------------------------------------------------------
+//
+// O cartao conta o que o quadro leu da ultima vez. Quando alguem mexe no pedido
+// no Bling -- cancela a nota, refatura, muda a situacao --, a noticia so chega
+// no proximo ciclo, e ate la o cartao afirma com confianca uma coisa que deixou
+// de ser verdade.
+//
+// Esta rota e a saida de emergencia pra isso: le UM pedido, agora, com as
+// MESMAS regras da varredura (e literalmente o mesmo codigo, com a lista de um
+// item so). Quatro chamadas ao Bling, e nenhum efeito sobre os outros
+// quadrados.
+//
+// Passa pela trava porque escreve no mesmo banco que a varredura: duas
+// gravacoes sobre o mesmo pedido, vindas de rodadas diferentes, e o tipo de
+// corrida que deixa um dado pela metade e ninguem descobre como.
+app.post("/api/pedido/reler", express.json(), async (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ error: "pin invalido" });
+  const numero = String(req.body?.orderNumber || "").trim();
+  if (!numero) return res.status(400).json({ error: "informe orderNumber" });
+
+  try {
+    const { runSyncBling } = await import("./sync-bling.js");
+    const { rodou, resultado } = await comTravaDeSincronizacao(() => runSyncBling({ pedidoUnico: numero }));
+    if (!rodou) {
+      return res.status(409).json({ error: "Uma sincronização do Bling está em andamento. Tente de novo em instantes." });
+    }
+    if (resultado?.achou === false) {
+      return res.status(404).json({ error: `O Bling não conhece um pedido com o número ${numero}.` });
+    }
+    console.log(`[quadro] pedido ${numero} relido no Bling a pedido de alguem.`);
+    // O pedido pode ter SUMIDO do quadro por causa da releitura -- cancelado, ou
+    // refeito noutro pedido. O painel precisa saber disso pra fechar em vez de
+    // seguir mostrando um cartao que o quadro nao lista mais.
+    res.json({ ok: true, pedido: getOrder(numero) || null, resultado });
+  } catch (err) {
+    console.error(`[api/pedido/reler] falha em ${numero}:`, err);
+    res.status(500).json({ error: "Não consegui reler o pedido no Bling.", detail: err.message });
+  }
+});
+
 app.get("/api/pin-exigido", (req, res) => res.json({ exigido: !!process.env.QUADRO_PIN }));
 
 // POST /api/reconstruir?s=<segredo>&confirmar=APAGAR-E-RELER&dias=30
@@ -173,6 +216,8 @@ app.post("/api/fonteslog/sessao", express.json({ limit: "1mb" }), async (req, re
 // pra por que o captcha obriga a pessoa a passar pelo dominio do portal, e por
 // que estas duas rotas pedem PIN num quadro que de resto e aberto.
 app.post("/api/fonteslog/entrar/religar", handleReligar);
+// So pra testar o aviso vermelho sem esperar a sessao cair sozinha.
+app.post("/api/fonteslog/entrar/derrubar", handleDerrubar);
 app.post("/api/fonteslog/entrar/credenciais", handleCredenciais);
 app.post("/api/fonteslog/entrar/sessao", handleSessaoColada);
 

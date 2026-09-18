@@ -64,6 +64,28 @@ no marketplace (`numero_loja`), e dali sai a decisão:
 Nada é apagado: o registro continua no banco e volta sozinho se o Bling mudar
 de ideia.
 
+**Detalhe que custa caro se esquecido:** a listagem `/nfe` **esconde** nota
+cancelada e rejeitada — a janela 17–18/09 devolve 10 notas, todas situação 5 ou
+6, e a 000323 (cancelada) só aparece quando se pergunta por ela com
+`situacao=2`. Trazer as escondidas na listagem geral seria simples e pior: são
+44 notas em 60 dias, e isso ligaria a rotina que **desmonta** quadrado (apaga o
+rastreio, derruba o `temNota`) em cima de quadrados que hoje estão certos. Em
+vez disso, a situação é perguntada **uma nota por vez**, só quando o pedido
+aponta para uma nota que a listagem não trouxe — e o que se lê vira rótulo, sem
+mexer em estado nenhum. No ensaio contra a produção, 13 pedidos se
+qualificavam e só um respondeu "Cancelada".
+
+### O botão "Reler no Bling"
+
+Dentro do pop-up de cada pedido. Lê **só aquele pedido**, na hora, com o mesmo
+código da varredura — acha o pedido pelo número, lê o detalhe, a nota dele pelo
+id e o objeto de postagem. Quatro chamadas, nenhum efeito sobre os outros
+quadrados, e não avança o carimbo de "última leitura" (que responde por
+*quadro inteiro*, não por um cartão).
+
+É a resposta para "o Bling já sabe, o quadro ainda não" sem esperar o ciclo de
+duas horas — e sem precisar varrer nada.
+
 ## Pedido parado também é problema
 
 As regras de cor olham o último evento. Um pedido coletado e esquecido tem,
