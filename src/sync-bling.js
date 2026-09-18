@@ -33,7 +33,7 @@ import {
   nomeDaSituacaoDaNota,
 } from "./integrations/bling.js";
 import { mapTextoDaTransportadora, ehEventoFinal } from "./lib/statusMapping.js";
-import { upsertOrder, mesclarEmCanonico, registrarApelidos, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota } from "./lib/db.js";
+import { upsertOrder, mesclarEmCanonico, registrarApelidos, setMeta, getOrder, listOrders, apagarPedido, chaveNota, indicePorNota, marcarVendasRefeitas } from "./lib/db.js";
 
 /**
  * Mapa das notas do periodo, indexado pelo ID (que e como o pedido as
@@ -148,6 +148,9 @@ async function lerNotas({ dataDe, dataAte, marcar = () => {}, apenasNovas = fals
       situacao: n.situacao ?? detalhe?.situacao ?? null,
       vale: notaVale(n.situacao ?? detalhe?.situacao),
       transportador: detalhe?.transporte?.transportador?.nome || null,
+      // O numero da venda no marketplace vem na nota tambem -- e e por ele que
+      // a remessa nascida como nota se junta ao grupo do pedido que a originou.
+      numeroLoja: String(detalhe?.numeroPedidoLoja ?? "").trim() || null,
       // O id do volume e a chave do OBJETO DE POSTAGEM, que e onde o codigo de
       // rastreio realmente mora. A nota devolve so o id; o codigo vem de
       // /logisticas/objetos/{id}.
@@ -314,6 +317,22 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
       const notaOpina = !!notaBruta && !notaBruta.pular;
       const rastreio = notaOpina ? nota?.rastreio || null : undefined;
 
+      // A SITUACAO DA NOTA, que o quadro lia e jogava fora.
+      //
+      // Ate aqui, nota cancelada virava so `temNota: false` -- e um pedido sem
+      // nota e um pedido que ainda nao faturou, que e verde. Guardar o rotulo e
+      // o que permite dizer a diferenca entre "ainda nao emitiu" e "emitiu e a
+      // nota caiu".
+      //
+      //   pedido sem nota nenhuma  null   -- apaga rotulo antigo
+      //   nota lida                o nome dela
+      //   nota pulada              undefined -- nao opina, o quadro ja tem
+      const situacaoNota = detalhe?.notaFiscal?.id
+        ? notaOpina
+          ? nomeDaSituacaoDaNota(notaBruta.situacao)
+          : undefined
+        : null;
+
       // Situacao do pedido no Bling: e a unica fonte que sabe de cancelamento.
       const situacao = situacoes[String(detalhe?.situacao?.id)] || null;
       const etiquetaDoPedido =
@@ -360,6 +379,11 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
         // sobreviver para sempre. Nota pulada nao manda em nada.
         trackingCodeAutoritativo: notaOpina,
         situacaoBling: situacao || undefined,
+        situacaoNota,
+        // O numero da venda no marketplace. Ja era apelido; agora e tambem
+        // coluna, porque e ele que diz que o pedido 1551 e o 1560 sao a mesma
+        // compra da Ilma na Shopee.
+        numeroLoja: numeroLoja || undefined,
         placedAt: dados.data || undefined,
         // Quando esta venda virou REMESSA. E a data que o filtro de periodo
         // usa: um pedido de domingo faturado na segunda saiu do armazem junto
@@ -427,6 +451,7 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
           trackingCode: null,
           trackingCodeAutoritativo: true,
           temNota: false,
+          situacaoNota: nomeDaSituacaoDaNota(nota.situacao),
           situacaoBling: `Nota ${nomeDaSituacaoDaNota(nota.situacao) || "sem valor"}`,
         });
         r.notasSemValor++;
@@ -452,6 +477,8 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
       natureza: nota.natureza || undefined,
       bonificacao: nota.bonificacao || undefined,
       notaFiscal: nota.numero,
+      situacaoNota: nomeDaSituacaoDaNota(nota.situacao),
+      numeroLoja: nota.numeroLoja || undefined,
       canonicoDaNota: true,
       placedAt: nota.emissao || undefined,
       notaEmitidaEm: nota.emissao || undefined,
@@ -489,6 +516,18 @@ export async function runSyncBling({ dias = 60, alteradosDesde = null, diasDeNot
     if (candidatos.length) r.mesclados += mesclarEmCanonico(canonico, candidatos).mesclados;
   }
 
+  // Quem foi refeito em quem.
+  //
+  // Roda nas duas vias, e nao so na varredura: nao custa chamada nenhuma (e
+  // leitura do proprio quadro) e o cancelamento costuma chegar justamente pela
+  // via rapida, minutos depois de a venda ser reemitida.
+  //
+  // Depois da mesclagem por nota, de proposito: antes dela o quadrado novo
+  // ainda pode estar partido em dois, e o grupo sairia com um irmao a mais.
+  const refeitas = marcarVendasRefeitas();
+  r.refeitas = refeitas.marcados;
+  r.liberadas = refeitas.liberados;
+
   // A limpeza varre o QUADRO INTEIRO, e nao so o que esta rodada leu -- entao
   // ela pertence a varredura, nao a via rapida. Rodando de minutos em minutos
   // ela nao acrescentaria nada (o que ela apaga nao depende da janela) e daria
@@ -521,6 +560,11 @@ export function limparPedidosSemStatus() {
       !o.carrierStatus &&
       !o.trackingCode &&
       !o.temNota &&
+      // Nota CANCELADA e informacao, e das boas: a remessa foi desfeita. Sem
+      // esta linha o registro cai aqui como se fosse vazio -- e o pedido que
+      // ninguem refaturou some do quadro em vez de pedir atencao. (O que ja foi
+      // refeito noutro pedido tambem fica: e ele que guarda para quem.)
+      !/cancel|rejeit/i.test(String(o.situacaoNota || '')) &&
       // Pedido que entrou POR ter estourado o prazo da NF nao tem nada disso --
       // e exatamente esse o problema dele. Sem esta linha, a sincronizacao o
       // criava e a limpeza o apagava no mesmo ciclo, para sempre.

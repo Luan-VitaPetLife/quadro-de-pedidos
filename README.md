@@ -41,6 +41,29 @@ vira a chave canônica, porque é a que o WMS usa e a que a operação reconhece
 O Bling **não cria** quadrados — só enriquece e une. Um pedido só ganha um
 quadrado quando o WMS ou a transportadora têm algo a dizer sobre ele.
 
+### Nota cancelada, e a venda refeita em outro pedido
+
+Cancelar a **nota** não cancela a **venda**: a situação do pedido no Bling
+segue `Aguardando Envio`, e por isso o quadro precisa olhar as duas coisas.
+
+O caso que criou a regra: a Ilma comprou uma vez na Shopee e o Bling ficou com
+dois pedidos carregando o mesmo `numeroLoja` — o 1551, com a nota 000323
+**cancelada**, e o 1560, com a nota 001223 autorizada. Os dois apareciam
+**verdes**: a situação do pedido não acusava nada, e o Shopee Xpress não manda
+evento nenhum, então também não havia silêncio a cobrar.
+
+Agora o quadro guarda a situação da nota (`situacao_nota`) e o número da venda
+no marketplace (`numero_loja`), e dali sai a decisão:
+
+| Situação | O que o quadro faz |
+|---|---|
+| Nota cancelada/rejeitada e **outro pedido da mesma venda** com nota de pé | o antigo sai do quadro apontando para o novo (`substituido_por`) |
+| Nota cancelada/rejeitada e **ninguém refez** | 🟨 “Nota 000323 cancelada no Bling e ninguém refez o faturamento” |
+| A nota do substituto também cai | o antigo **volta** ao quadro, amarelo |
+
+Nada é apagado: o registro continua no banco e volta sozinho se o Bling mudar
+de ideia.
+
 ## Pedido parado também é problema
 
 As regras de cor olham o último evento. Um pedido coletado e esquecido tem,

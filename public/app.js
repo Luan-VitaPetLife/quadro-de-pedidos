@@ -752,6 +752,10 @@ function abrirPainel(numero) {
         secao("Para quem", [campo("Cliente", o.customer), campo("Destino", o.city)]),
         secao("Documento", [
           campo("Nota fiscal", o.notaFiscal, true),
+          // A situação da NOTA é outra coisa que a do pedido: nota cancelada
+          // não cancela a venda, mas desfaz a remessa — e era esse o dado que
+          // faltava quando dois pedidos da mesma compra apareciam verdes.
+          campo("Situação da nota", o.situacaoNota),
           campo("Natureza da operação", o.natureza),
           campo("Situação no Bling", o.situacaoBling),
           campo("Também conhecido como", (o.apelidos || []).join(", "), true),

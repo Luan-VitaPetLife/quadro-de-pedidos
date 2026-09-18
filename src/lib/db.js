@@ -108,6 +108,33 @@ if (!existingCols.includes("ultimo_movimento_at")) db.exec("ALTER TABLE orders A
 // sabem disso: cancelamento acontece no ERP, e so o ERP conta.
 if (!existingCols.includes("situacao_bling")) db.exec("ALTER TABLE orders ADD COLUMN situacao_bling TEXT");
 
+// O numero da venda no MARKETPLACE -- "260918B141YKF9", o pedido da Shopee.
+//
+// O Bling ja mandava esse numero, e o quadro ja o usava: como APELIDO, pra
+// achar o pedido quando a transportadora telefonasse. Guardar em coluna propria
+// responde outra pergunta, que apelido nenhum responde: QUAIS pedidos do Bling
+// sao a mesma venda?
+if (!existingCols.includes("numero_loja")) db.exec("ALTER TABLE orders ADD COLUMN numero_loja TEXT");
+
+// A situacao da NOTA -- "Autorizada", "Cancelada", "Rejeitada".
+//
+// O quadro lia a situacao do PEDIDO e jogava fora a da nota. Quando a nota era
+// cancelada, tudo que sobrava era `tem_nota = 0` -- que e indistinguivel de
+// "ainda nem faturou", e portanto verde.
+//
+// Foi assim que o pedido 1551 da Ilma (Shopee) ficou verde: a nota 000323 dele
+// foi CANCELADA e a venda refeita como nota 001223 no pedido 1560. Duas
+// entradas verdes, lado a lado, para uma encomenda so.
+if (!existingCols.includes("situacao_nota")) db.exec("ALTER TABLE orders ADD COLUMN situacao_nota TEXT");
+
+// Esta venda foi REFEITA em outro pedido.
+//
+// O marketplace cancela e reemite: a mesma venda da Shopee volta ao Bling como
+// pedido novo, com nota nova, e o antigo fica para tras com a nota cancelada.
+// Sao a mesma encomenda, entao so a que esta de pe merece quadrado -- a outra
+// sai do quadro do mesmo jeito que um cancelamento sai, sem ser apagada.
+if (!existingCols.includes("substituido_por")) db.exec("ALTER TABLE orders ADD COLUMN substituido_por TEXT");
+
 // Ocultar: a decisao humana sobre o que o sistema nao consegue decidir.
 //
 // Existe caso que nenhuma regra resolve bem. Uma encomenda extraviada tem como
@@ -270,6 +297,29 @@ function rowToOrder(r) {
     if (doBling !== "green") motivo = `Pedido ${String(r.situacao_bling).toLowerCase()} no Bling`;
   }
 
+  // NOTA DESFEITA E NINGUEM REFEZ.
+  //
+  // Cancelar a nota nao cancela a venda -- a situacao do pedido segue
+  // "Aguardando Envio" --, mas desfaz a REMESSA: nao ha mais documento, nao ha
+  // mais etiqueta valida, e nada vai sair do armazem por conta dela.
+  //
+  // Precisa ficar acima do `semAcompanhamento`, que zera as duas regras de
+  // tempo e devolve verde. Ele existe pra nao cobrar noticia de quem nao tem
+  // como falar (Shopee Xpress, Mercado Envios) -- mas aqui nao falta noticia:
+  // o Bling ja disse o que houve. Sem esta regra, pedido de marketplace com
+  // nota cancelada ficava verde para sempre.
+  //
+  // Amarelo, e nao vermelho: o que se sabe e que alguem precisa decidir --
+  // refaturar ou encerrar. Quando o proprio marketplace ja refez a venda em
+  // outro pedido, `substituido_por` tira este do quadro e esta regra nem chega
+  // a aparecer.
+  const notaDesfeita =
+    /cancel|rejeit/i.test(String(r.situacao_nota || "")) && r.tem_nota !== 1 && !r.substituido_por;
+  if (notaDesfeita) {
+    statusFinal = pior(statusFinal, "amber");
+    motivo = `Nota ${r.nota_fiscal ? r.nota_fiscal + " " : ""}${String(r.situacao_nota).toLowerCase()} no Bling e ninguém refez o faturamento`;
+  }
+
   // Cor sem explicacao e o defeito que mais voltou neste projeto. Quando
   // nenhuma regra escreveu um motivo, quem responde e a fonte que declarou a
   // cor -- o rotulo dela ja diz tudo ("REJEITADA", "Extravio total").
@@ -295,7 +345,11 @@ function rowToOrder(r) {
     // venda deixou de existir, entao nao ha o que acompanhar -- mostrar em
     // vermelho so gastaria a atencao de alguem com um caso ja encerrado.
     // O REGISTRO fica: some da tela, nao do banco, e continua sendo atualizado.
-    foraDoQuadro: /cancel/i.test(String(r.situacao_bling || "")),
+    // Venda refeita em outro pedido sai pela mesma porta: ela nao foi
+    // cancelada, mas quem responde por ela agora e o pedido novo -- e mostrar
+    // as duas e mostrar a mesma encomenda duas vezes.
+    foraDoQuadro: /cancel/i.test(String(r.situacao_bling || "")) || !!r.substituido_por,
+    substituidoPor: r.substituido_por || null,
     oculto: !!r.oculto_em,
     ocultoEm: r.oculto_em || null,
     ocultoMotivo: r.oculto_motivo || null,
@@ -335,6 +389,12 @@ function rowToOrder(r) {
     // Numero da nota que o WMS mostra ("000000246 - 001") -- e por ele que a
     // operacao acha a nota no Bling.
     notaFiscal: r.nota_fiscal,
+    // A situacao da NOTA, que nao e a do pedido: nota cancelada nao cancela a
+    // venda, mas desfaz a remessa.
+    situacaoNota: r.situacao_nota || null,
+    // O numero desta venda no marketplace. Dois quadrados com o mesmo numero
+    // sao a mesma encomenda.
+    numeroLoja: r.numero_loja || null,
     // Coleta agendada na Mandae. Vem disfarcada de evento com data futura.
     coletaPrevista: r.coleta_prevista,
     apelidos: r.apelidos ? r.apelidos.split(",").filter(Boolean) : [],
@@ -354,11 +414,13 @@ const upsertStmt = db.prepare(`
   INSERT INTO orders (
     order_number, brand, customer, status, wms_status, wms_severity,
     carrier_status, carrier_severity, bonificacao, natureza, previsao_entrega, nota_emitida_em, tem_nota, nota_fiscal, coleta_prevista, apelidos,
-    tracking_code, city, placed_at, last_event_at, rastreio_desconhecido, ultimo_movimento_at, situacao_bling, updated_at
+    tracking_code, city, placed_at, last_event_at, rastreio_desconhecido, ultimo_movimento_at, situacao_bling,
+    situacao_nota, numero_loja, substituido_por, updated_at
   ) VALUES (
     @orderNumber, @brand, @customer, @status, @wmsStatus, @wmsSeverity,
     @carrierStatus, @carrierSeverity, @bonificacao, @natureza, @previsaoEntrega, @notaEmitidaEm, @temNota, @notaFiscal, @coletaPrevista, @apelidos,
-    @trackingCode, @city, @placedAt, @lastEventAt, @rastreioDesconhecido, @ultimoMovimentoAt, @situacaoBling, @updatedAt
+    @trackingCode, @city, @placedAt, @lastEventAt, @rastreioDesconhecido, @ultimoMovimentoAt, @situacaoBling,
+    @situacaoNota, @numeroLoja, @substituidoPor, @updatedAt
   )
   ON CONFLICT(order_number) DO UPDATE SET
     brand = excluded.brand,
@@ -383,6 +445,9 @@ const upsertStmt = db.prepare(`
     rastreio_desconhecido = excluded.rastreio_desconhecido,
     ultimo_movimento_at = excluded.ultimo_movimento_at,
     situacao_bling = excluded.situacao_bling,
+    situacao_nota = excluded.situacao_nota,
+    numero_loja = excluded.numero_loja,
+    substituido_por = excluded.substituido_por,
     updated_at = excluded.updated_at
 `);
 
@@ -687,6 +752,13 @@ export function upsertOrder(partial, { permitirCriacao = false } = {}) {
     city: partial.city ?? existing.city ?? null,
     placedAt: partial.placedAt ?? existing.placedAt ?? null,
     situacaoBling: partial.situacaoBling ?? existing.situacaoBling ?? null,
+    // `!== undefined` e nao `??`: quando a nota volta a ser valida (ou o pedido
+    // deixa de ter nota), quem le do Bling precisa poder APAGAR o rotulo antigo.
+    // Com `??`, um "Cancelada" gravado uma vez nunca mais sairia.
+    situacaoNota: partial.situacaoNota !== undefined ? partial.situacaoNota : existing.situacaoNota ?? null,
+    numeroLoja: partial.numeroLoja ?? existing.numeroLoja ?? null,
+    substituidoPor:
+      partial.substituidoPor !== undefined ? partial.substituidoPor : existing.substituidoPor ?? null,
     rastreioDesconhecido:
       partial.rastreioDesconhecido !== undefined
         ? (partial.rastreioDesconhecido ? 1 : 0)
@@ -807,6 +879,7 @@ export function mesclarEmCanonico(numeroCanonico, apelidos = []) {
 
     for (const campo of [
       "brand", "customer", "city", "placedAt", "natureza", "previsaoEntrega", "notaEmitidaEm", "notaFiscal", "coletaPrevista",
+      "situacaoNota", "numeroLoja",
       "wmsStatus", "wmsSeverity", "carrierStatus", "carrierSeverity", "trackingCode",
     ]) {
       const jaTem = atual[campo] !== undefined && atual[campo] !== null && atual[campo] !== "";
@@ -870,6 +943,70 @@ export function indicePorNota() {
     mapa.get(k).push(o.orderNumber);
   }
   return mapa;
+}
+
+// ---------------------------------------------------------------------------
+// A MESMA VENDA, DOIS PEDIDOS
+// ---------------------------------------------------------------------------
+//
+// Marketplace cancela e reemite. Quando isso acontece, o Bling fica com dois
+// pedidos carregando o MESMO numero de venda ("260918B141YKF9"): o antigo, cuja
+// nota foi cancelada, e o novo, com nota valida.
+//
+// O caso que trouxe isto: a Ilma Garcia Pereira comprou UMA vez na Shopee, e o
+// quadro mostrava dois quadrados verdes -- o pedido 1551 (nota 000323,
+// CANCELADA) e o 1560 (nota 001223, autorizada). Nenhuma regra pegava o
+// primeiro: a situacao do PEDIDO seguia "Aguardando Envio" (cancelar a nota nao
+// cancela a venda no ERP) e o Shopee Xpress nao manda evento nenhum, entao nao
+// havia silencio a cobrar.
+//
+// Quem decide nao e a data, e a NOTA. Pedido com nota de pe esta vivo; pedido
+// cuja ultima nota foi cancelada ou rejeitada, tendo um irmao vivo, foi refeito
+// nele -- e sai do quadro apontando pra quem tomou o lugar dele.
+//
+// O contrario tambem acontece e precisa ser desfeito: se a nota do substituto
+// cair, ninguem mais esta vivo no grupo e o antigo VOLTA ao quadro -- agora
+// como o que ele e, um pedido sem nota, sob a regra de prazo e sob o amarelo
+// de "nota cancelada e ninguem refez".
+function notaDesfeita(o) {
+  return /cancel|rejeit/i.test(String(o.situacaoNota || "")) && !o.temNota;
+}
+
+export function marcarVendasRefeitas() {
+  const porVenda = new Map();
+  for (const o of listOrders()) {
+    if (!o.numeroLoja) continue;
+    if (!porVenda.has(o.numeroLoja)) porVenda.set(o.numeroLoja, []);
+    porVenda.get(o.numeroLoja).push(o);
+  }
+
+  const gravar = db.prepare("UPDATE orders SET substituido_por = ? WHERE order_number = ?");
+  const r = { marcados: 0, liberados: 0 };
+
+  for (const irmaos of porVenda.values()) {
+    // O vivo mais recente: se por algum motivo houver dois de pe (venda
+    // dividida em duas remessas, por exemplo), nenhum dos dois e "desfeito",
+    // entao nenhum sai do quadro -- so quem tem nota cancelada sai.
+    const vivo = irmaos
+      .filter((o) => o.temNota && !notaDesfeita(o))
+      .sort((a, b) =>
+        String(a.notaEmitidaEm || a.placedAt || "").localeCompare(String(b.notaEmitidaEm || b.placedAt || ""))
+      )
+      .pop();
+
+    for (const o of irmaos) {
+      const dono = vivo && vivo.orderNumber !== o.orderNumber && notaDesfeita(o) ? vivo.orderNumber : null;
+      if ((o.substituidoPor || null) === dono) continue;
+      gravar.run(dono, o.orderNumber);
+      if (dono) r.marcados++;
+      else r.liberados++;
+    }
+  }
+
+  if (r.marcados || r.liberados) {
+    console.log(`[db] vendas refeitas: ${r.marcados} marcada(s), ${r.liberados} liberada(s).`);
+  }
+  return r;
 }
 
 /**
