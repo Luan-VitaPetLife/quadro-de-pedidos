@@ -986,34 +986,54 @@ function notaDesfeita(o) {
 }
 
 export function marcarVendasRefeitas() {
+  const todos = listOrders();
+
   const porVenda = new Map();
-  for (const o of listOrders()) {
+  for (const o of todos) {
     if (!o.numeroLoja) continue;
     if (!porVenda.has(o.numeroLoja)) porVenda.set(o.numeroLoja, []);
     porVenda.get(o.numeroLoja).push(o);
   }
 
-  const gravar = db.prepare("UPDATE orders SET substituido_por = ? WHERE order_number = ?");
-  const r = { marcados: 0, liberados: 0 };
-
+  // Primeiro decide quais marcas DEVEM existir; so depois compara com as que
+  // existem. Sao duas perguntas diferentes, e junta-las foi o que escondeu seis
+  // remessas de verdade.
+  const devidas = new Map();
   for (const irmaos of porVenda.values()) {
-    // O vivo mais recente: se por algum motivo houver dois de pe (venda
-    // dividida em duas remessas, por exemplo), nenhum dos dois e "desfeito",
-    // entao nenhum sai do quadro -- so quem tem nota cancelada sai.
+    // O vivo mais recente: se houver dois de pe (venda dividida em duas
+    // remessas, por exemplo), nenhum dos dois e "desfeito", entao nenhum sai do
+    // quadro -- so quem tem nota cancelada sai.
     const vivo = irmaos
       .filter((o) => o.temNota && !notaDesfeita(o))
       .sort((a, b) =>
         String(a.notaEmitidaEm || a.placedAt || "").localeCompare(String(b.notaEmitidaEm || b.placedAt || ""))
       )
       .pop();
-
+    if (!vivo) continue;
     for (const o of irmaos) {
-      const dono = vivo && vivo.orderNumber !== o.orderNumber && notaDesfeita(o) ? vivo.orderNumber : null;
-      if ((o.substituidoPor || null) === dono) continue;
-      gravar.run(dono, o.orderNumber);
-      if (dono) r.marcados++;
-      else r.liberados++;
+      if (o.orderNumber !== vivo.orderNumber && notaDesfeita(o)) devidas.set(o.orderNumber, vivo.orderNumber);
     }
+  }
+
+  const gravar = db.prepare("UPDATE orders SET substituido_por = ? WHERE order_number = ?");
+  const r = { marcados: 0, liberados: 0 };
+
+  // A VARREDURA E SOBRE O QUADRO INTEIRO, e nao so sobre quem esta num grupo.
+  //
+  // A versao anterior so visitava quadrado COM numero de venda. Marca posta por
+  // engano num quadrado que depois ficou sem esse numero virava orfa: ninguem
+  // mais passava por ela, e o quadrado ficava fora do quadro para sempre.
+  //
+  // Nao e hipotese. Aconteceu: uma rodada contaminada marcou sete quadrados,
+  // o conserto tirou deles o numero de venda alheio -- e seis remessas com
+  // "EXPEDIDO" no armazem sumiram do quadro sem nada que as trouxesse de volta.
+  // Uma marca que so se poe, e nunca se revisita, e uma porta que so tranca.
+  for (const o of todos) {
+    const dono = devidas.get(o.orderNumber) || null;
+    if ((o.substituidoPor || null) === dono) continue;
+    gravar.run(dono, o.orderNumber);
+    if (dono) r.marcados++;
+    else r.liberados++;
   }
 
   if (r.marcados || r.liberados) {
