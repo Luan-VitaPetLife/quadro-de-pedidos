@@ -82,7 +82,15 @@ const AMBER_PATTERNS = [
 // Cada transportadora escolhe o proprio substantivo (pedido, objeto, encomenda,
 // pacote). O verbo e sempre o mesmo. Entao a lista e de substantivos, e um
 // canal novo se resolve acrescentando um aqui -- num lugar so.
-const ENTREGUE = /entrega realizada|(pedido|objeto|encomenda|pacote) entregue/;
+//
+// O Mercado Livre e o caso que nao se resolve com substantivo: ele anuncia a
+// entrega como "A transportadora ja informou sobre a chegada do item". A frase
+// PARECE descrever chegada na unidade -- e foi lida assim aqui por um tempo,
+// entao ficava verde mas nao encerrava nada. O pedido 1459 pagou a conta: ultimo
+// movimento em 12/09, e no dia 21 o quadro dizia "parado ha 6 dias uteis sem se
+// mover" sobre uma encomenda ja entregue. Quem opera confirmou o significado; a
+// frase e do ML, a leitura e nossa, e a nossa estava errada.
+const ENTREGUE = /entrega realizada|(pedido|objeto|encomenda|pacote) entregue|informou sobre a chegada/;
 
 const GREEN_PATTERNS = [
   ENTREGUE, // 1
@@ -102,7 +110,6 @@ const GREEN_PATTERNS = [
   // Vocabulario do objeto de postagem do Bling, que descreve as
   // transportadoras que nao tem integracao propria aqui (Mercado Livre,
   // Shopee). Lido de uma amostra de 59 objetos reais, nao da documentacao.
-  /informou sobre a chegada/, // ML avisando que o item chegou a unidade
   /divergencia resolvida/,    // houve um problema e ele FOI resolvido
 ];
 
