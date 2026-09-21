@@ -63,8 +63,29 @@ const AMBER_PATTERNS = [
   /nenhuma atualizacao/,
 ];
 
+// ---------------------------------------------------------------------------
+// "Entregue", escrito UMA vez
+// ---------------------------------------------------------------------------
+//
+// Duas listas diferentes descreviam a mesma coisa, e por isso divergiram: a cor
+// reconhecia "pedido entregue", e o fim-de-linha reconhecia
+// "(pedido|objeto|encomenda) entregue". Quer dizer que "Encomenda entregue"
+// encerrava o envelhecimento mas NAO ficava verde -- uma combinacao que ninguem
+// desenhou, so sobrou.
+//
+// O caso que cobrou a conta foi o pedido 1482, do TikTok Shop: a transportadora
+// dele escreve "Pacote entregue", e "pacote" nao estava em lista nenhuma. O
+// pedido foi entregue em 18/09 e o quadro seguia mostrando amarelo, dizendo que
+// continuava pendente -- porque, sem casar como entrega, o envelhecimento
+// continuou contando os dias de silencio de uma encomenda que ja tinha chegado.
+//
+// Cada transportadora escolhe o proprio substantivo (pedido, objeto, encomenda,
+// pacote). O verbo e sempre o mesmo. Entao a lista e de substantivos, e um
+// canal novo se resolve acrescentando um aqui -- num lugar so.
+const ENTREGUE = /entrega realizada|(pedido|objeto|encomenda|pacote) entregue/;
+
 const GREEN_PATTERNS = [
-  /entrega realizada|pedido entregue/, // 1
+  ENTREGUE, // 1
   /processo iniciado/, // 0
   /coletad|em separacao/, // "Encomenda coletada" / "em processo de separacao": progresso normal
   /rota final|saiu para entrega/, // 31
@@ -218,12 +239,13 @@ import { diasUteisDesde, dataLocal } from "./diasUteis.js";
 
 // Eventos que encerram a vida do pedido: depois deles o silencio e esperado,
 // entao envelhecer seria errado -- um pedido entregue fica verde para sempre.
-const FINAL_PATTERNS = [/entrega realizada/, /(pedido|objeto|encomenda) entregue/];
-
+//
+// A MESMA constante que pinta de verde, de proposito: eram duas listas, elas
+// divergiram, e o resultado foi um pedido entregue que o quadro cobrava como
+// pendente. Ver o comentario de ENTREGUE.
 export function ehEventoFinal(texto) {
   if (!texto) return false;
-  const t = normalizar(texto);
-  return FINAL_PATTERNS.some((re) => re.test(t));
+  return ENTREGUE.test(normalizar(texto));
 }
 
 // ---------------------------------------------------------------------------
