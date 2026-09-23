@@ -121,9 +121,44 @@ export async function renovarToken(refreshToken) {
  * migracao funcionou -- e descobrir de madrugada que nao -- nao e teste.
  */
 export async function renovarAgora() {
-  const tokens = lerTokens();
-  if (!tokens) throw new Error("BLING_NAO_AUTORIZADO");
-  return renovarToken(tokens.refreshToken);
+  return renovarUmaVez({ forcar: true });
+}
+
+// ---------------------------------------------------------------------------
+// Uma renovacao por vez
+// ---------------------------------------------------------------------------
+//
+// O refresh token e de uso unico: quem renova primeiro recebe um par novo, e o
+// antigo morre. Se duas chamadas acharem o access_token vencido ao mesmo tempo,
+// as duas tentam renovar com o MESMO refresh token -- e a segunda perde.
+//
+// A trava de sincronizacao nao impede isso, porque nem tudo passa por ela:
+// /bling/diagnostico, /sonda, /investigar, /pente-fino e /bling/renovar chamam o
+// Bling por fora, e qualquer um deles pode coincidir com uma varredura bem no
+// minuto em que o token vence.
+//
+// O estrago nao e perder o token -- pedirToken so grava depois de sucesso, entao
+// o par do vencedor sobrevive. E a rodada perdedora morrer no meio dizendo
+// BLING_NAO_AUTORIZADO, o que manda alguem reautorizar a toa.
+//
+// Entao a renovacao em andamento e UMA promessa compartilhada: quem chegar
+// durante ela espera o mesmo resultado, em vez de disparar a sua.
+let renovacaoEmCurso = null;
+
+function renovarUmaVez({ forcar = false } = {}) {
+  if (!renovacaoEmCurso) {
+    renovacaoEmCurso = (async () => {
+      // Le DENTRO da renovacao, nao antes: se outra acabou de gravar um par
+      // novo, e o refresh token dele que vale -- o lido antes ja morreu.
+      const tokens = lerTokens();
+      if (!tokens) throw new Error("BLING_NAO_AUTORIZADO");
+      if (!forcar && Date.now() < tokens.expiraEm) return tokens; // alguem ja renovou
+      return renovarToken(tokens.refreshToken);
+    })().finally(() => {
+      renovacaoEmCurso = null;
+    });
+  }
+  return renovacaoEmCurso;
 }
 
 /**
@@ -144,9 +179,17 @@ export async function tokenValido() {
 
   console.log("[bling] access_token expirou, renovando...");
   try {
-    const novos = await renovarToken(tokens.refreshToken);
+    const novos = await renovarUmaVez();
     return novos.accessToken;
   } catch (err) {
+    // A promessa compartilhada so cobre ESTE processo. Se outro processo no
+    // mesmo volume renovou primeiro, o nosso refresh token morreu -- mas o par
+    // novo ja esta gravado, e basta le-lo em vez de declarar a autorizacao
+    // perdida.
+    const atual = lerTokens();
+    if (atual && atual.refreshToken !== tokens.refreshToken && Date.now() < atual.expiraEm) {
+      return atual.accessToken;
+    }
     // Refresh de 30 dias tambem expira. Nesse caso nao ha o que fazer sozinho:
     // alguem precisa autorizar de novo no navegador.
     throw new Error(`BLING_NAO_AUTORIZADO (falha ao renovar: ${err.message})`);
