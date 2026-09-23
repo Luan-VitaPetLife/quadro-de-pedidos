@@ -145,14 +145,25 @@ export async function renovarAgora() {
 // durante ela espera o mesmo resultado, em vez de disparar a sua.
 let renovacaoEmCurso = null;
 
-function renovarUmaVez({ forcar = false } = {}) {
+/**
+ * @param {{forcar?: boolean, recusado?: string}} opcoes
+ *   forcar   renova mesmo com o access_token dentro da validade (/bling/renovar).
+ *   recusado o access_token que o Bling acabou de recusar com 401. So renova se
+ *            ele AINDA for o gravado; se outra chamada ja trocou, devolve o par
+ *            novo sem gastar outra renovacao.
+ */
+function renovarUmaVez({ forcar = false, recusado = null } = {}) {
   if (!renovacaoEmCurso) {
     renovacaoEmCurso = (async () => {
       // Le DENTRO da renovacao, nao antes: se outra acabou de gravar um par
       // novo, e o refresh token dele que vale -- o lido antes ja morreu.
       const tokens = lerTokens();
       if (!tokens) throw new Error("BLING_NAO_AUTORIZADO");
-      if (!forcar && Date.now() < tokens.expiraEm) return tokens; // alguem ja renovou
+      if (recusado) {
+        if (tokens.accessToken !== recusado) return tokens; // alguem ja trocou o recusado
+      } else if (!forcar && Date.now() < tokens.expiraEm) {
+        return tokens; // alguem ja renovou
+      }
       return renovarToken(tokens.refreshToken);
     })().finally(() => {
       renovacaoEmCurso = null;
@@ -221,7 +232,7 @@ async function esperarAVez() {
   ultimaChamada = Date.now();
 }
 
-async function blingFetch(caminho, params = {}, tentativa = 1) {
+async function blingFetch(caminho, params = {}, tentativa = 1, jaRenovou = false) {
   const token = await tokenValido();
   const url = `${BASE}${caminho}?${new URLSearchParams(params)}`;
 
@@ -235,10 +246,30 @@ async function blingFetch(caminho, params = {}, tentativa = 1) {
     const espera = 1000 * 2 ** (tentativa - 1); // 1s, 2s, 4s, 8s
     console.warn(`[bling] 429 em ${caminho}; esperando ${espera}ms e tentando de novo (${tentativa}/4)`);
     await dormir(espera);
-    return blingFetch(caminho, params, tentativa + 1);
+    return blingFetch(caminho, params, tentativa + 1, jaRenovou);
   }
 
-  if (res.status === 401) throw new Error("BLING_NAO_AUTORIZADO");
+  // 401 com o token dentro da validade: o Bling deixou de aceitar ESTE token.
+  //
+  // Antes, isso virava BLING_NAO_AUTORIZADO na hora -- e como a renovacao so
+  // acontecia pelo relogio, o Bling ficava fora ate o token vencer sozinho, ate
+  // seis horas depois. Aconteceu na migracao pro JWT: o deploy passou a mandar
+  // `enable-jwt: 1` com o token opaco que estava gravado, o Bling recusou tudo,
+  // e so nao virou apagao porque alguem forcou a renovacao um minuto depois.
+  //
+  // Agora: uma renovacao (a compartilhada -- 401 simultaneos nao disputam o
+  // refresh token) e UMA nova tentativa. Se o token novo tambem for recusado,
+  // o problema nao e o token, e insistir so esconderia isso.
+  if (res.status === 401) {
+    if (jaRenovou) throw new Error("BLING_NAO_AUTORIZADO");
+    console.warn(`[bling] 401 em ${caminho}; renovando o token e tentando de novo`);
+    try {
+      await renovarUmaVez({ recusado: token });
+    } catch (err) {
+      throw new Error(`BLING_NAO_AUTORIZADO (401, e a renovacao falhou: ${err.message})`);
+    }
+    return blingFetch(caminho, params, tentativa, true);
+  }
   if (!res.ok) throw new Error(`Bling respondeu ${res.status} em ${caminho}: ${(await res.text()).slice(0, 200)}`);
   return res.json();
 }
