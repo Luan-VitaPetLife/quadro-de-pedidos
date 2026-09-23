@@ -12,7 +12,7 @@ import { handleEventoBling } from "./webhooks/blingEventos.js";
 import { handleInvestigar } from "./webhooks/investigar.js";
 import { handlePenteFino } from "./webhooks/penteFino.js";
 import { anotarSaida, registrarBoot, lerDiario } from "./lib/diarioDeSaida.js";
-import { handleAutorizar, handleCallback, handleStatus, handleDiagnostico, handleSincronizar, handleLimpar, handleSonda } from "./webhooks/bling.js";
+import { handleAutorizar, handleCallback, handleStatus, handleRenovar, handleDiagnostico, handleSincronizar, handleLimpar, handleSonda } from "./webhooks/bling.js";
 import { aplicarSessao, lerWmsAgora, handleCredenciais, handleSessaoColada, handleReligar, handleDerrubar } from "./webhooks/wmsLogin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -268,6 +268,7 @@ app.post("/webhooks/bling", handleEventoBling);
 app.get("/bling/autorizar", handleAutorizar);
 app.get("/bling/callback", handleCallback);
 app.get("/bling/status", handleStatus);
+app.post("/bling/renovar", handleRenovar);
 app.get("/bling/diagnostico", handleDiagnostico);
 app.post("/bling/sincronizar", handleSincronizar);
 app.post("/bling/limpar", handleLimpar);

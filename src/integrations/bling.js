@@ -24,6 +24,19 @@ import { getMeta, setMeta } from "../lib/db.js";
 
 const BASE = "https://api.bling.com.br/Api/v3";
 
+// JWT (developer.bling.com.br/migracao-jwt). O Bling vai parar de aceitar o
+// token opaco, e o formato novo so vem quando PEDIDO: `enable-jwt: 1` na troca
+// do code, na renovacao, e -- segundo a documentacao -- em toda chamada seguinte.
+//
+// Uma constante so, usada pelos dois unicos lugares que falam com o Bling
+// (pedirToken e blingFetch). Espalhar o header por chamada seria convidar o dia
+// em que uma rota nova esquece dele e passa a ser recusada sem ninguem saber
+// por que.
+//
+// O JWT tem 1.500 a 3.000 caracteres. Onde ele mora (meta.value, TEXT no
+// SQLite) nao tem limite de tamanho -- nada a migrar no banco.
+const CABECALHOS_BLING = { "enable-jwt": "1" };
+
 function credenciais() {
   const clientId = process.env.BLING_CLIENT_ID;
   const clientSecret = process.env.BLING_CLIENT_SECRET;
@@ -75,6 +88,7 @@ async function pedirToken(corpo) {
   const res = await fetch(`${BASE}/oauth/token`, {
     method: "POST",
     headers: {
+      ...CABECALHOS_BLING,
       Authorization: basic(),
       "Content-Type": "application/x-www-form-urlencoded",
       Accept: "application/json",
@@ -97,6 +111,29 @@ export async function trocarCodePorToken(code) {
 /** Renova o acesso usando o refresh_token (validade de 30 dias). */
 export async function renovarToken(refreshToken) {
   return pedirToken({ grant_type: "refresh_token", refresh_token: refreshToken });
+}
+
+/**
+ * Renova AGORA, sem esperar o access_token vencer.
+ *
+ * Existe pela migracao pro JWT: a renovacao automatica so acontece a cada ~6h,
+ * e e ela que traz o token no formato novo. Esperar seis horas pra saber se a
+ * migracao funcionou -- e descobrir de madrugada que nao -- nao e teste.
+ */
+export async function renovarAgora() {
+  const tokens = lerTokens();
+  if (!tokens) throw new Error("BLING_NAO_AUTORIZADO");
+  return renovarToken(tokens.refreshToken);
+}
+
+/**
+ * O formato de um token, sem revela-lo. JWT sao tres blocos base64url
+ * separados por ponto, e o cabecalho sempre comeca com "eyJ" ('{"' codificado).
+ */
+export function descreverToken(token) {
+  if (!token) return null;
+  const jwt = /^eyJ[\w-]*\.[\w-]+\.[\w-]+$/.test(token);
+  return { formato: jwt ? "jwt" : "opaco", tamanho: token.length };
 }
 
 /** Devolve um access_token valido, renovando sozinho se preciso. */
@@ -147,7 +184,7 @@ async function blingFetch(caminho, params = {}, tentativa = 1) {
 
   await esperarAVez();
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    headers: { ...CABECALHOS_BLING, Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
 
   if (res.status === 429) {

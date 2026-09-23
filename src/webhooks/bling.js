@@ -8,7 +8,7 @@
 // autorizado, o proprio quadro consulta a API sozinho, sem ninguem por perto.
 
 import crypto from "node:crypto";
-import { urlDeAutorizacao, trocarCodePorToken, lerTokens } from "../integrations/bling.js";
+import { urlDeAutorizacao, trocarCodePorToken, lerTokens, renovarAgora, descreverToken } from "../integrations/bling.js";
 import { getMeta } from "../lib/db.js";
 import { verifyMandaeWebhook } from "./mandae.js";
 import { comTravaDeSincronizacao, sincronizacaoEmCurso } from "../lib/travaDeSincronizacao.js";
@@ -122,7 +122,33 @@ export function handleStatus(req, res) {
     obtidoEm: t.obtidoEm,
     accessTokenValidoAte: new Date(t.expiraEm).toISOString(),
     accessTokenExpirado: Date.now() >= t.expiraEm,
+    // Formato e tamanho, nunca o valor. E por aqui que se confirma a migracao
+    // pro JWT: "opaco" depois do prazo do Bling quer dizer chamadas recusadas.
+    accessToken: descreverToken(t.accessToken),
+    refreshToken: descreverToken(t.refreshToken),
   });
+}
+
+// POST /bling/renovar?s=<segredo> -- renova o token agora, sem esperar vencer.
+//
+// Serve pra migracao pro JWT (e pra qualquer dia em que se queira confirmar que
+// a renovacao funciona sem esperar seis horas). Devolve o formato do token
+// antes e depois -- a prova da migracao e esse "opaco" virar "jwt".
+export async function handleRenovar(req, res) {
+  if (!verifyMandaeWebhook(req)) return res.status(401).json({ error: "segredo invalido" });
+  const antes = lerTokens();
+  try {
+    const depois = await renovarAgora();
+    res.json({
+      ok: true,
+      antes: descreverToken(antes?.accessToken),
+      depois: descreverToken(depois.accessToken),
+      refreshDepois: descreverToken(depois.refreshToken),
+      validoAte: new Date(depois.expiraEm).toISOString(),
+    });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
 }
 
 // GET /bling/diagnostico?s=<segredo>
